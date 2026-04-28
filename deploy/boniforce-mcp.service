@@ -1,0 +1,22 @@
+[Unit]
+Description=Boniforce MCP server
+After=network.target
+
+[Service]
+Type=simple
+User=boniforce
+Group=boniforce
+WorkingDirectory=/opt/boniforce-mcp
+EnvironmentFile=/opt/boniforce-mcp/.env
+ExecStart=/opt/boniforce-mcp/.venv/bin/uvicorn boniforce_mcp.server:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3
+StateDirectory=boniforce-mcp
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/boniforce-mcp
+
+[Install]
+WantedBy=multi-user.target

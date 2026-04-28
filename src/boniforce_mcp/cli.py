@@ -1,0 +1,80 @@
+"""Admin CLI for the Boniforce MCP server."""
+from __future__ import annotations
+
+import asyncio
+import getpass
+
+import typer
+
+from . import auth, crypto, storage
+
+app = typer.Typer(help="Boniforce MCP admin commands.")
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+@app.command()
+def genkey() -> None:
+    """Generate a Fernet key for BF_ENCRYPTION_KEY."""
+    typer.echo(crypto.generate_key())
+
+
+@app.command()
+def gensigning() -> None:
+    """Generate an RSA private key (PEM) for BF_OAUTH_SIGNING_KEY."""
+    typer.echo(auth.generate_signing_key_pem())
+
+
+@app.command()
+def initdb() -> None:
+    """Create the SQLite schema (idempotent)."""
+    _run(storage.init_db())
+    typer.echo("Database initialized.")
+
+
+@app.command()
+def adduser(email: str) -> None:
+    """Create an MCP user. Prompts for password."""
+    pw1 = getpass.getpass("Password: ")
+    pw2 = getpass.getpass("Confirm:  ")
+    if pw1 != pw2:
+        typer.echo("Passwords do not match.", err=True)
+        raise typer.Exit(1)
+    if len(pw1) < 8:
+        typer.echo("Password must be at least 8 characters.", err=True)
+        raise typer.Exit(1)
+    _run(storage.init_db())
+    user = _run(storage.create_user(email, pw1))
+    typer.echo(f"Created user {user.email} (id {user.id}).")
+
+
+@app.command()
+def setkey(email: str, label: str | None = None) -> None:
+    """Store a Boniforce API token for the given user (encrypted)."""
+    user = _run(storage.get_user_by_email(email))
+    if not user:
+        typer.echo(f"No such user: {email}", err=True)
+        raise typer.Exit(1)
+    token = getpass.getpass("Boniforce token: ").strip()
+    if not token:
+        typer.echo("Empty token.", err=True)
+        raise typer.Exit(1)
+    _run(storage.set_bf_token(user.id, token, label))
+    typer.echo(f"Boniforce token saved for {email}.")
+
+
+@app.command()
+def listusers() -> None:
+    """List all users."""
+    users = _run(storage.list_users())
+    if not users:
+        typer.echo("(no users)")
+        return
+    for u in users:
+        typer.echo(f"{u.id}\t{u.email}")
+
+
+if __name__ == "__main__":
+    app()

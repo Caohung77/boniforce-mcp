@@ -1,0 +1,245 @@
+"""
+FastMCP server exposing Boniforce endpoints as tools.
+
+Composition:
+- FastMCP app handles MCP protocol on /mcp (Streamable HTTP).
+- Starlette wraps it and adds OAuth 2.1 issuer routes from auth.py.
+- Tools read the authenticated user via FastMCP's AccessToken context,
+  fetch the user's stored Boniforce token, and call BoniforceClient.
+"""
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
+from fastmcp.server.auth.providers.jwt import JWTVerifier
+from fastmcp.server.dependencies import get_access_token
+from starlette.applications import Starlette
+from starlette.routing import Mount
+
+from . import auth, storage
+from .boniforce_client import BoniforceClient, BoniforceError
+from .config import get_settings
+
+
+def _build_verifier() -> JWTVerifier:
+    settings = get_settings()
+    return JWTVerifier(
+        public_key=auth.public_key_pem(),
+        issuer=settings.issuer,
+        audience=settings.jwt_audience,
+        algorithm="RS256",
+    )
+
+
+def _bf_client_from_state() -> BoniforceClient:
+    return _client_holder["client"]
+
+
+_client_holder: dict[str, Any] = {}
+
+
+@asynccontextmanager
+async def lifespan(app: Starlette):
+    await storage.init_db()
+    _client_holder["client"] = BoniforceClient()
+    try:
+        yield
+    finally:
+        await _client_holder["client"].aclose()
+
+
+def _make_mcp() -> FastMCP:
+    mcp = FastMCP(
+        name="Boniforce",
+        instructions=(
+            "Tools for the Boniforce credit/financial-data API. "
+            "Use search_companies first to find a company's register details, "
+            "then create_report or get_financial_data with those identifiers."
+        ),
+        auth=_build_verifier(),
+    )
+
+    async def _user_token() -> tuple[str, str]:
+        access = get_access_token()
+        if access is None or not access.claims:
+            raise ToolError("Not authenticated.")
+        user_id = access.claims.get("sub")
+        if not user_id:
+            raise ToolError("Token missing subject claim.")
+        bf = await storage.get_bf_token(user_id)
+        if not bf:
+            issuer = get_settings().issuer
+            raise ToolError(
+                f"No Boniforce API key linked to your account. Visit {issuer}/setup to add one."
+            )
+        return user_id, bf
+
+    def _wrap(exc: BoniforceError) -> ToolError:
+        return ToolError(f"Boniforce API returned {exc.status}: {exc.body}")
+
+    @mcp.tool
+    async def search_companies(query: str) -> Any:
+        """Search the Boniforce database for companies by name or identifier."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().search_companies(token, query)
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool
+    async def list_reports() -> Any:
+        """List all credit reports previously generated for the authenticated account."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().list_reports(token)
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool
+    async def create_report(
+        company_name: str,
+        register_type: str,
+        register_number: str,
+        register_court: str,
+        session_id: str | None = None,
+    ) -> Any:
+        """Create a new Boniforce credit report. Returns a job/report identifier; poll get_job_status."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().create_report(
+                token,
+                company_name=company_name,
+                register_type=register_type,
+                register_number=register_number,
+                register_court=register_court,
+                session_id=session_id,
+            )
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool
+    async def get_report(report_id: str) -> Any:
+        """Fetch a finished Boniforce report by its report_id."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().get_report(token, report_id)
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool
+    async def get_job_status(job_id: str) -> Any:
+        """Check the status of an asynchronous report-generation job."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().get_job_status(token, job_id)
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool
+    async def get_financial_data(
+        company_name: str,
+        register_type: str,
+        register_number: str,
+        register_court: str,
+        session_id: str | None = None,
+    ) -> Any:
+        """Get raw financial data for a company by register identifiers."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().get_financial_data(
+                token,
+                company_name=company_name,
+                register_type=register_type,
+                register_number=register_number,
+                register_court=register_court,
+                session_id=session_id,
+            )
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool
+    async def get_financial_analysis(
+        company_name: str,
+        register_type: str,
+        register_number: str,
+        register_court: str,
+        session_id: str | None = None,
+    ) -> Any:
+        """Get Boniforce's financial-data analysis and credit score for a company."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().get_financial_analysis(
+                token,
+                company_name=company_name,
+                register_type=register_type,
+                register_number=register_number,
+                register_court=register_court,
+                session_id=session_id,
+            )
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool
+    async def get_report_financial_data(report_id: str) -> Any:
+        """Fetch the financial data attached to an existing report."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().get_report_financial_data(token, report_id)
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool
+    async def get_report_financial_analysis(report_id: str) -> Any:
+        """Fetch the financial-analysis section of an existing report."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().get_report_financial_analysis(token, report_id)
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    return mcp
+
+
+def build_app() -> Starlette:
+    mcp = _make_mcp()
+    mcp_app = mcp.http_app(path="/mcp", transport="http")
+    outer = Starlette(
+        routes=[*auth.routes(), Mount("/", app=mcp_app)],
+        lifespan=lambda _outer: _combined_lifespan(mcp_app),
+    )
+    return outer
+
+
+@asynccontextmanager
+async def _combined_lifespan(mcp_app: Starlette):
+    await storage.init_db()
+    _client_holder["client"] = BoniforceClient()
+    inner_lifespan = mcp_app.router.lifespan_context
+    try:
+        async with inner_lifespan(mcp_app):
+            yield
+    finally:
+        await _client_holder["client"].aclose()
+
+
+# uvicorn entry point: `uvicorn boniforce_mcp.server:app`
+app = build_app()
+
+
+def main() -> None:
+    import uvicorn
+
+    settings = get_settings()
+    uvicorn.run(
+        "boniforce_mcp.server:app",
+        host=settings.host,
+        port=settings.port,
+        log_level="info",
+    )
+
+
+if __name__ == "__main__":
+    main()
