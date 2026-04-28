@@ -77,6 +77,21 @@ def generate_signing_key_pem() -> str:
 
 # ---------------- PKCE helpers ----------------
 
+def _redirect_uri_allowed(submitted: str, registered: list[str]) -> bool:
+    """Exact match, or fnmatch against patterns containing '*'.
+    Used so a single ChatGPT-Custom-GPT OAuth client can accept callbacks
+    under any g-XXXXX id (the URL changes with every draft save)."""
+    import fnmatch
+
+    for pat in registered:
+        if "*" in pat:
+            if fnmatch.fnmatchcase(submitted, pat):
+                return True
+        elif submitted == pat:
+            return True
+    return False
+
+
 def _verify_pkce(verifier: str, challenge: str, method: str) -> bool:
     if method == "S256":
         digest = hashlib.sha256(verifier.encode()).digest()
@@ -279,7 +294,7 @@ async def authorize(request: Request) -> Response:
     client = await storage.get_client(client_id)
     if not client:
         return JSONResponse({"error": "unauthorized_client"}, status_code=400)
-    if params["redirect_uri"] not in client.redirect_uris:
+    if not _redirect_uri_allowed(params["redirect_uri"], client.redirect_uris):
         return JSONResponse({"error": "invalid_request", "error_description": "redirect_uri mismatch"}, status_code=400)
 
     # PKCE: required for public clients (no secret), optional for confidential.

@@ -80,8 +80,18 @@ def listusers() -> None:
 def register_gpt_client(
     name: str = typer.Option(..., help="Human label, e.g. 'ChatGPT Boniforce GPT'."),
     redirect_uri: str = typer.Option(
-        ...,
-        help="OAuth callback URL ChatGPT will use, e.g. https://chatgpt.com/aip/g-XXXX/oauth/callback",
+        None,
+        help="Specific OAuth callback URL. Omit when --chatgpt is set.",
+    ),
+    chatgpt: bool = typer.Option(
+        False,
+        "--chatgpt",
+        help=(
+            "Register a wildcard client that accepts any ChatGPT Custom-GPT "
+            "callback (https://chat.openai.com/aip/*/oauth/callback and the "
+            "chatgpt.com variant). Avoids re-registering every time the GPT "
+            "draft id changes."
+        ),
     ),
 ) -> None:
     """Register a static OAuth client for ChatGPT Custom GPT Actions.
@@ -90,9 +100,19 @@ def register_gpt_client(
     pre-register a confidential client and print client_id + client_secret
     to paste into the GPT builder's OAuth fields.
     """
+    if chatgpt:
+        redirect_uris = [
+            "https://chat.openai.com/aip/*/oauth/callback",
+            "https://chatgpt.com/aip/*/oauth/callback",
+        ]
+    elif redirect_uri:
+        redirect_uris = [redirect_uri]
+    else:
+        typer.echo("Provide --redirect-uri or --chatgpt.", err=True)
+        raise typer.Exit(2)
     _run(storage.init_db())
     client_id, secret = _run(
-        storage.register_client(name, [redirect_uri], "client_secret_post")
+        storage.register_client(name, redirect_uris, "client_secret_post")
     )
     typer.echo(f"client_id:     {client_id}")
     typer.echo(f"client_secret: {secret}")
