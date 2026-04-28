@@ -31,6 +31,21 @@ Boniforce dashboard.
 
 ---
 
+## Get your Boniforce API key
+
+You'll need this once, when you first connect.
+
+1. Log in to your **Boniforce account** at [boniforce.de](https://boniforce.de).
+2. In the left sidebar click **API-Schlüssel**.
+3. Click the yellow button **"Neuen Schlüssel erstellen"** in the top-right.
+4. Give it a name (e.g. `chatgpt` or `claude`) and confirm.
+5. **Copy the full key now** — it starts with `sk_live-…` and is shown only once.
+
+![Where to find Boniforce API keys in the dashboard](assets/get-api-key.png)
+
+Treat the key like a password. You can revoke or rotate it any time on the
+same page; revoking immediately disconnects the AI assistant.
+
 ## Connect
 
 The Boniforce-hosted server is at:
