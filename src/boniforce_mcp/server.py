@@ -17,7 +17,10 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.server.dependencies import get_access_token
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.routing import Mount
+from starlette.types import ASGIApp
 
 from . import auth, storage
 from .boniforce_client import BoniforceClient, BoniforceError
@@ -29,7 +32,7 @@ def _build_verifier() -> JWTVerifier:
     return JWTVerifier(
         public_key=auth.public_key_pem(),
         issuer=settings.issuer,
-        audience=settings.jwt_audience,
+        audience=settings.audience,
         algorithm="RS256",
     )
 
@@ -203,11 +206,29 @@ def _make_mcp() -> FastMCP:
     return mcp
 
 
+class WWWAuthenticateResourceMetadataMiddleware(BaseHTTPMiddleware):
+    """Inject resource_metadata=... into WWW-Authenticate header per RFC 9728."""
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if response.status_code == 401:
+            existing = response.headers.get("www-authenticate", "")
+            iss = get_settings().issuer
+            hint = f'resource_metadata="{iss}/.well-known/oauth-protected-resource"'
+            if existing.lower().startswith("bearer"):
+                if "resource_metadata" not in existing:
+                    response.headers["www-authenticate"] = f"{existing}, {hint}"
+            else:
+                response.headers["www-authenticate"] = f"Bearer {hint}"
+        return response
+
+
 def build_app() -> Starlette:
     mcp = _make_mcp()
     mcp_app = mcp.http_app(path="/mcp", transport="http")
     outer = Starlette(
         routes=[*auth.routes(), Mount("/", app=mcp_app)],
+        middleware=[Middleware(WWWAuthenticateResourceMetadataMiddleware)],
         lifespan=lambda _outer: _combined_lifespan(mcp_app),
     )
     return outer

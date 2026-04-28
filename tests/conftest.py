@@ -24,7 +24,7 @@ def _env(tmp_path, monkeypatch):
     monkeypatch.setenv("BF_OAUTH_SIGNING_KEY", auth_mod.generate_signing_key_pem())
     monkeypatch.setenv("BF_ISSUER_URL", "http://testserver")
     monkeypatch.setenv("BF_API_BASE", "https://api.boniforce.de")
-    monkeypatch.setenv("BF_JWT_AUDIENCE", "boniforce-mcp")
+    monkeypatch.delenv("BF_JWT_AUDIENCE", raising=False)
 
     get_settings.cache_clear()
     yield

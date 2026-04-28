@@ -87,14 +87,17 @@ def _verify_pkce(verifier: str, challenge: str, method: str) -> bool:
 
 # ---------------- token helpers ----------------
 
-def _issue_access_token(user_id: str, client_id: str, scope: str) -> tuple[str, int]:
+def _issue_access_token(
+    user_id: str, client_id: str, scope: str, resource: str | None = None
+) -> tuple[str, int]:
     settings = get_settings()
     now = int(time.time())
     ttl = 3600
+    audience = resource or settings.audience
     payload = {
         "iss": settings.issuer,
         "sub": user_id,
-        "aud": settings.jwt_audience,
+        "aud": audience,
         "iat": now,
         "exp": now + ttl,
         "jti": str(uuid.uuid4()),
@@ -228,10 +231,11 @@ async def metadata_protected_resource(request: Request) -> JSONResponse:
     iss = get_settings().issuer
     return JSONResponse(
         {
-            "resource": iss,
+            "resource": f"{iss}/mcp",
             "authorization_servers": [iss],
             "scopes_supported": ["mcp"],
             "bearer_methods_supported": ["header"],
+            "resource_documentation": f"{iss}/",
         }
     )
 

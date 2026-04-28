@@ -67,7 +67,8 @@ def test_protected_resource_metadata(app):
     with TestClient(app) as c:
         r = c.get("/.well-known/oauth-protected-resource")
     assert r.status_code == 200
-    assert r.json()["resource"] == "http://testserver"
+    assert r.json()["resource"] == "http://testserver/mcp"
+    assert r.json()["authorization_servers"] == ["http://testserver"]
 
 
 def test_jwks_returns_one_rsa_key(app):
@@ -153,7 +154,7 @@ async def test_full_pkce_flow(app, seeded_user):
             body["access_token"],
             public_key_pem(),
             algorithms=["RS256"],
-            audience="boniforce-mcp",
+            audience="http://testserver/mcp",
             issuer="http://testserver",
         )
         assert decoded["sub"] == seeded_user.id

@@ -20,11 +20,19 @@ class Settings(BaseSettings):
     api_base: str = "https://api.boniforce.de"
     host: str = "127.0.0.1"
     port: int = 8000
-    jwt_audience: str = "boniforce-mcp"
+    jwt_audience: str = ""
 
     @property
     def issuer(self) -> str:
         return self.issuer_url.rstrip("/")
+
+    @property
+    def resource(self) -> str:
+        return f"{self.issuer}/mcp"
+
+    @property
+    def audience(self) -> str:
+        return self.jwt_audience or self.resource
 
     @property
     def jwks_uri(self) -> str:
