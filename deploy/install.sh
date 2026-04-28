@@ -78,10 +78,9 @@ systemctl reload caddy || systemctl restart caddy
 
 echo
 echo "==> firewall hint: ufw allow 80/tcp && ufw allow 443/tcp"
-echo "==> create your first user:"
-echo "   sudo -u $SVC_USER $REPO_DIR/.venv/bin/boniforce-mcp adduser you@example.com"
-echo "==> link your Boniforce token:"
-echo "   sudo -u $SVC_USER $REPO_DIR/.venv/bin/boniforce-mcp setkey you@example.com"
+echo
+echo "Users self-provision by pasting their Boniforce API key on first connect."
+echo "No 'adduser' step is required."
 echo
 echo "Connector URL to add in Claude/ChatGPT:"
 echo "   https://$DOMAIN/mcp"

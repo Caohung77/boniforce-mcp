@@ -122,9 +122,9 @@ BF_OAUTH_SIGNING_KEY="$(boniforce-mcp gensigning | awk 'BEGIN{ORS="\\n"}1')"
 BF_API_BASE=https://api.boniforce.de
 EOF
 
-boniforce-mcp adduser you@example.com
-boniforce-mcp setkey  you@example.com
 uvicorn boniforce_mcp.server:app --port 8000
+# Open http://localhost:8000/oauth/authorize?... in MCP Inspector;
+# the API-key form will accept any token api.boniforce.de validates.
 ```
 
 Probe with the official MCP Inspector:
