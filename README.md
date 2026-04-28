@@ -78,6 +78,46 @@ You need to enable it once:
 > Custom connectors are currently **web-only** in ChatGPT and not yet exposed
 > on the free tier.
 
+### Build a public Custom GPT (per-user keys)
+
+Want a public GPT in the ChatGPT directory that other users can adopt — but
+**each user uses their own Boniforce API key**? The same server exposes a
+REST mirror at `https://mcp.boniforce.de/api/v1/*` plus an OpenAPI spec, so
+you can wire it into a Custom GPT's *Aktionen* panel.
+
+1. Get an OAuth client for ChatGPT (one-off, on the server):
+
+   ```bash
+   docker exec -it boniforce-mcp boniforce-mcp register-gpt-client \
+     --name "ChatGPT Boniforce GPT" \
+     --redirect-uri "https://chatgpt.com/aip/<your-gpt-id>/oauth/callback"
+   ```
+
+   Copy `client_id` + `client_secret` from the output.
+
+2. In **chatgpt.com → GPTs erkunden → Erstellen → Konfigurieren → Aktionen hinzufügen**:
+
+   | Field | Value |
+   |---|---|
+   | Authentifizierung | **OAuth** |
+   | Client ID | from CLI |
+   | Client Secret | from CLI |
+   | Authorization URL | `https://mcp.boniforce.de/oauth/authorize` |
+   | Token URL | `https://mcp.boniforce.de/oauth/token` |
+   | Scope | `mcp` |
+   | Token Exchange Method | **POST request body** (`client_secret_post`) |
+   | Schema → "Von URL kopieren" | `https://mcp.boniforce.de/api/openapi.json` |
+   | Privacy-Policy-URL | `https://boniforce.de/datenschutz` |
+
+3. Save → publish (Nur ich / Mit Link / Öffentlich).
+
+End-user flow inside the public GPT:
+
+> User opens the GPT → asks a question → ChatGPT redirects to our
+> `/oauth/authorize` page → user pastes their **own** Boniforce API key →
+> token issued, stored per-user by ChatGPT → all subsequent calls use that
+> user's key. Same per-user isolation as the MCP connector path.
+
 ### Try it
 
 The Boniforce tools now appear in your chat sidebar. Sample prompts:

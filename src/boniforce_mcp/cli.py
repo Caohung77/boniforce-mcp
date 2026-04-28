@@ -76,5 +76,30 @@ def listusers() -> None:
         typer.echo(f"{u.id}\t{u.email}")
 
 
+@app.command("register-gpt-client")
+def register_gpt_client(
+    name: str = typer.Option(..., help="Human label, e.g. 'ChatGPT Boniforce GPT'."),
+    redirect_uri: str = typer.Option(
+        ...,
+        help="OAuth callback URL ChatGPT will use, e.g. https://chatgpt.com/aip/g-XXXX/oauth/callback",
+    ),
+) -> None:
+    """Register a static OAuth client for ChatGPT Custom GPT Actions.
+
+    Custom GPT Actions don't support Dynamic Client Registration, so we
+    pre-register a confidential client and print client_id + client_secret
+    to paste into the GPT builder's OAuth fields.
+    """
+    _run(storage.init_db())
+    client_id, secret = _run(
+        storage.register_client(name, [redirect_uri], "client_secret_post")
+    )
+    typer.echo(f"client_id:     {client_id}")
+    typer.echo(f"client_secret: {secret}")
+    typer.echo("")
+    typer.echo("Paste these into the Custom GPT 'Aktionen' OAuth panel.")
+    typer.echo("Save the client_secret now — it cannot be recovered.")
+
+
 if __name__ == "__main__":
     app()

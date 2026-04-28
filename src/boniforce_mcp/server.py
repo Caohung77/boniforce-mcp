@@ -22,7 +22,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.routing import Mount
 from starlette.types import ASGIApp
 
-from . import auth, storage
+from . import auth, rest_api, storage
 from .boniforce_client import BoniforceClient, BoniforceError
 from .config import get_settings
 
@@ -214,7 +214,7 @@ def build_app() -> Starlette:
     mcp = _make_mcp()
     mcp_app = mcp.http_app(path="/mcp", transport="http")
     outer = Starlette(
-        routes=[*auth.routes(), Mount("/", app=mcp_app)],
+        routes=[*auth.routes(), *rest_api.routes(), Mount("/", app=mcp_app)],
         middleware=[Middleware(WWWAuthenticateResourceMetadataMiddleware)],
         lifespan=lambda _outer: _combined_lifespan(mcp_app),
     )
