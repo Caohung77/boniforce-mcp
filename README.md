@@ -2,164 +2,169 @@
 
 Remote **Model Context Protocol** server that wraps the
 [Boniforce API](https://api.boniforce.de/v1/docs) and exposes its endpoints as
-tools usable from **ChatGPT Connectors** and **Claude.ai Custom Connectors**.
+tools usable from **Claude.ai Custom Connectors** and **ChatGPT Connectors**.
 
 The server speaks MCP Streamable HTTP and ships its own OAuth 2.1
 authorization server (PKCE + Dynamic Client Registration), so it satisfies
-both Claude's and ChatGPT's connector requirements.
+both Claude's and ChatGPT's connector requirements out of the box.
 
-## Tools
+---
 
-| MCP tool                          | Underlying Boniforce endpoint                                  |
-|-----------------------------------|----------------------------------------------------------------|
-| `search_companies`                | `GET /v1/search`                                               |
-| `list_reports`                    | `GET /v1/reports`                                              |
-| `create_report`                   | `POST /v1/reports`                                             |
-| `get_report`                      | `GET /v1/reports/{report_id}`                                  |
-| `get_job_status`                  | `GET /v1/jobs/{job_id}/status`                                 |
-| `get_financial_data`              | `GET /v1/financial_data`                                       |
-| `get_financial_analysis`          | `GET /v1/financial_data/analysis`                              |
-| `get_report_financial_data`       | `GET /v1/reports/{report_id}/financial_data`                   |
-| `get_report_financial_analysis`   | `GET /v1/reports/{report_id}/financial_data/analysis`          |
+## Use it (for Boniforce customers)
 
-Each user logs into the MCP server once and links their personal Boniforce API
-token; that token is encrypted at rest (Fernet) and used to authenticate the
-underlying HTTP calls.
-
-## Quickstart (local)
-
-```bash
-git clone <this repo> Boniforce-MCP
-cd Boniforce-MCP
-python3.11 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
-
-# generate keys
-echo "BF_ENCRYPTION_KEY=$(boniforce-mcp genkey)" > .env
-printf 'BF_OAUTH_SIGNING_KEY="%s"\n' "$(boniforce-mcp gensigning | awk 'BEGIN{ORS="\\n"}1')" >> .env
-cat >> .env <<'EOF'
-BF_ISSUER_URL=http://localhost:8000
-BF_DB_PATH=./boniforce-mcp.sqlite
-BF_API_BASE=https://api.boniforce.de
-BF_JWT_AUDIENCE=boniforce-mcp
-EOF
-
-boniforce-mcp adduser you@example.com
-boniforce-mcp setkey you@example.com   # paste your Boniforce token
-
-uvicorn boniforce_mcp.server:app --port 8000
-```
-
-Then point [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
-at `http://localhost:8000/mcp` to walk the OAuth + tool flow:
-
-```bash
-npx @modelcontextprotocol/inspector http://localhost:8000/mcp
-```
-
-## Deploy on Ubuntu 87.106.211.11
-
-### 1. DNS
-
-Pick a public hostname and point an `A` record at `87.106.211.11`. Two cheap
-options:
-
-* You own a domain — add `mcp.<your-domain>` → `87.106.211.11`.
-* You don't — register `boniforce-mcp.duckdns.org` (free) and point that.
-
-You need this *before* running the installer; Caddy uses it to issue a Let's
-Encrypt certificate.
-
-### 2. Firewall
-
-```bash
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw enable
-```
-
-### 3. systemd + Caddy (recommended)
-
-```bash
-git clone <this repo> /tmp/boniforce-mcp
-cd /tmp/boniforce-mcp
-sudo DOMAIN=mcp.boniforce.de ./deploy/install.sh
-```
-
-The script:
-
-1. installs Python 3.11 and Caddy
-2. creates a `boniforce` system user
-3. copies the source to `/opt/boniforce-mcp` and builds a venv
-4. generates fresh `BF_ENCRYPTION_KEY` and `BF_OAUTH_SIGNING_KEY` and writes
-   `/opt/boniforce-mcp/.env`
-5. installs the systemd unit (`boniforce-mcp.service`) and enables it
-6. drops a `Caddyfile` for your domain and reloads Caddy
-
-After it finishes, create your first user and link your Boniforce token:
-
-```bash
-sudo -u boniforce /opt/boniforce-mcp/.venv/bin/boniforce-mcp adduser you@example.com
-sudo -u boniforce /opt/boniforce-mcp/.venv/bin/boniforce-mcp setkey  you@example.com
-```
-
-### 4. Docker Compose alternative
-
-```bash
-cd deploy
-cp ../.env.example ../.env       # edit to taste
-sed -i 's/mcp\.example\.com/your.domain/' Caddyfile
-docker compose up -d
-```
-
-(SQLite data and Caddy state live in named volumes.)
-
-## Adding the connector
-
-### Claude.ai
-Settings → Connectors → **Add custom connector** → URL:
+You don't need to install anything. The official Boniforce-hosted instance is at:
 
 ```
 https://mcp.boniforce.de/mcp
 ```
 
-Claude walks the OAuth flow, you sign in with the email/password you set via
-`adduser`, and the 9 Boniforce tools appear.
+### Add to Claude
 
-### ChatGPT
-Settings → Connectors → **Add** → same URL. ChatGPT requires OAuth 2.1 + DCR;
-this server provides both, so no extra config.
+1. Open [claude.ai](https://claude.ai) → **Settings → Connectors → Add custom connector**.
+2. Paste the URL above.
+3. A browser tab opens — sign in with your Boniforce MCP credentials.
+4. On first connection only: paste your Boniforce API token when prompted.
+5. The Boniforce tools appear in your chat.
 
-### First-run Boniforce-token link
+### Add to ChatGPT
 
-If a user logs in but has no Boniforce token stored, the OAuth flow shows a
-"Link your Boniforce API key" form before redirecting back — paste the token
-once and continue. Admins can pre-provision via `boniforce-mcp setkey`.
+Settings → **Connectors → Add** → paste the same URL. The OAuth flow is identical.
 
-## Endpoint reference
+### Don't have an account yet?
 
-| Path                                           | Purpose                                |
-|------------------------------------------------|----------------------------------------|
-| `/.well-known/oauth-authorization-server`      | OAuth 2.1 metadata (RFC 8414)          |
-| `/.well-known/oauth-protected-resource`        | Protected resource metadata (RFC 9728) |
-| `/oauth/register`                              | Dynamic Client Registration (RFC 7591) |
-| `/oauth/authorize`                             | OAuth authorization endpoint (PKCE)    |
-| `/oauth/login`                                 | Username/password login form target    |
-| `/oauth/token`                                 | Token endpoint                         |
-| `/jwks.json`                                   | JSON Web Key Set                       |
-| `/setup`                                       | Boniforce-token link form              |
-| `/mcp`                                         | MCP Streamable HTTP transport          |
+Contact Boniforce to be provisioned. End users get an email + password for the
+MCP login plus a personal Boniforce API token.
+
+---
+
+## Tools
+
+After connecting, your AI assistant can call any of these:
+
+| Tool                              | What it does                                                       |
+|-----------------------------------|--------------------------------------------------------------------|
+| `search_companies`                | Find a German company by name; returns register details.           |
+| `create_report`                   | Kick off Boniscore generation for a company.                       |
+| `get_job_status`                  | Poll a running report job until finished.                          |
+| `get_report`                      | Fetch the finished report: Boniscore, credit limit, assessment.    |
+| `get_report_financial_data`       | Drill into the underlying balance-sheet history.                   |
+| `get_report_financial_analysis`   | Drill into per-year financial ratios + sub-scores.                 |
+| `list_reports`                    | List previously generated reports for the account.                 |
+
+The assistant follows the workflow: **search → create_report → poll → get_report**.
+
+Example prompt:
+
+> *"What's the Boniscore and credit limit for Boniforce GmbH?"*
+
+---
+
+## Self-hosting
+
+Anyone can run their own instance against `api.boniforce.de` — useful for
+private routing, self-controlled OAuth, or development.
+
+### Requirements
+
+* A Linux host with Docker + Docker Compose
+* A public domain pointing to the host (Let's Encrypt needs port 80/443)
+* A Boniforce API token for each user you'll provision
+
+### Quick deploy (Docker + Caddy)
+
+```bash
+git clone https://github.com/Caohung77/boniforce-mcp
+cd boniforce-mcp/deploy
+
+# Edit Caddyfile: replace the example domain with yours
+sed -i 's/mcp\.boniforce\.de/your.domain.tld/' Caddyfile
+
+# Generate secrets and write .env (one-time)
+cat > ../.env <<EOF
+BF_ISSUER_URL=https://your.domain.tld
+BF_DB_PATH=/var/lib/boniforce-mcp/db.sqlite
+BF_ENCRYPTION_KEY=$(docker run --rm python:3.11-slim sh -c "pip install -q cryptography && python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'")
+BF_OAUTH_SIGNING_KEY="$(docker run --rm python:3.11-slim sh -c "pip install -q cryptography && python -c 'from cryptography.hazmat.primitives import serialization as s; from cryptography.hazmat.primitives.asymmetric import rsa; k=rsa.generate_private_key(65537,2048); print(k.private_bytes(s.Encoding.PEM,s.PrivateFormat.PKCS8,s.NoEncryption()).decode().replace(chr(10), chr(92)+chr(110)), end=\"\")'")"
+BF_API_BASE=https://api.boniforce.de
+BF_HOST=0.0.0.0
+BF_PORT=8000
+EOF
+chmod 600 ../.env
+
+docker compose up -d --build
+```
+
+Provision a user:
+
+```bash
+docker exec -it boniforce-mcp boniforce-mcp adduser you@example.com
+docker exec -it boniforce-mcp boniforce-mcp setkey  you@example.com
+```
+
+The connector URL is now `https://your.domain.tld/mcp`.
+
+### Behind an existing Traefik
+
+If your host already runs Traefik on a `traefik-public` network with an
+`letsencrypt` cert resolver, use the labelled compose file instead — no Caddy:
+
+```bash
+docker compose -f deploy/docker-compose.traefik.yml up -d --build
+```
+
+Adjust the `Host(...)` rule in `docker-compose.traefik.yml` to your domain.
+
+### Local development
+
+```bash
+python3.11 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+
+boniforce-mcp genkey > /dev/null   # confirms install
+cat > .env <<EOF
+BF_ISSUER_URL=http://localhost:8000
+BF_DB_PATH=./boniforce-mcp.sqlite
+BF_ENCRYPTION_KEY=$(boniforce-mcp genkey)
+BF_OAUTH_SIGNING_KEY="$(boniforce-mcp gensigning | awk 'BEGIN{ORS="\\n"}1')"
+BF_API_BASE=https://api.boniforce.de
+EOF
+
+boniforce-mcp adduser you@example.com
+boniforce-mcp setkey  you@example.com
+uvicorn boniforce_mcp.server:app --port 8000
+```
+
+Probe with the official MCP Inspector:
+
+```bash
+npx @modelcontextprotocol/inspector http://localhost:8000/mcp
+```
+
+---
 
 ## CLI
 
 ```
-boniforce-mcp genkey         # new Fernet key for BF_ENCRYPTION_KEY
-boniforce-mcp gensigning     # new RSA private key (PEM) for BF_OAUTH_SIGNING_KEY
-boniforce-mcp initdb         # create SQLite schema
+boniforce-mcp genkey         # Fernet key for BF_ENCRYPTION_KEY
+boniforce-mcp gensigning     # RSA private key for BF_OAUTH_SIGNING_KEY
+boniforce-mcp initdb         # create SQLite schema (idempotent)
 boniforce-mcp adduser EMAIL  # create user (prompts for password)
-boniforce-mcp setkey EMAIL   # store user's Boniforce token (prompts)
+boniforce-mcp setkey  EMAIL  # store user's Boniforce token (prompts)
 boniforce-mcp listusers
 ```
+
+## Endpoints
+
+| Path                                           | Purpose                                |
+|------------------------------------------------|----------------------------------------|
+| `/mcp`                                         | MCP Streamable HTTP transport          |
+| `/.well-known/oauth-authorization-server`      | OAuth 2.1 metadata (RFC 8414)          |
+| `/.well-known/oauth-protected-resource`        | Protected resource metadata (RFC 9728) |
+| `/oauth/register`                              | Dynamic Client Registration (RFC 7591) |
+| `/oauth/authorize`                             | OAuth authorization (PKCE)             |
+| `/oauth/token`                                 | Token endpoint                         |
+| `/jwks.json`                                   | JSON Web Key Set                       |
+| `/setup`                                       | Boniforce-token link form              |
 
 ## Testing
 
@@ -168,19 +173,20 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Tests cover:
-* httpx wrapping of every Boniforce endpoint (mocked with `respx`),
-* full OAuth 2.1 PKCE flow including DCR, login, code exchange and refresh,
-* PKCE failure rejection,
-* JWKS metadata.
+Tests cover the httpx client (mocked Boniforce backend), the full OAuth 2.1
+PKCE flow including DCR + refresh, PKCE failure rejection, and JWKS shape.
 
-## Security notes
+## Security
 
-* Boniforce tokens are stored encrypted with Fernet; the key lives in `.env`,
-  which is `chmod 600` and owned by the service user.
-* OAuth access tokens are short-lived (1 h) RS256 JWTs. Refresh tokens are
-  opaque, hashed in DB, single-use (rotating).
-* All HTTPS termination happens at Caddy; the FastMCP server only listens on
-  `127.0.0.1`.
-* PKCE is mandatory (`S256`); `plain` is rejected per OAuth 2.1.
-* Passwords are bcrypt-hashed.
+* Per-user Boniforce tokens stored Fernet-encrypted in SQLite; key in `.env`
+  (chmod 600, owned by the service user).
+* OAuth access tokens are short-lived (1 h) RS256 JWTs bound to the canonical
+  MCP resource URL. Refresh tokens are opaque, single-use, hashed in DB.
+* PKCE mandatory (`S256` only); `plain` rejected per OAuth 2.1.
+* Passwords bcrypt-hashed.
+* Reverse proxy (Caddy or Traefik) handles TLS; the application listens only
+  on the internal port.
+
+## License
+
+MIT.

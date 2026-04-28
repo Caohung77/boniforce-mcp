@@ -1,5 +1,5 @@
 # Compose file for hosts that already run Traefik fronting traefik-public.
-# Builds the local Dockerfile and registers a Host(`mcp.boniforce.de`) router
+# Builds the local Dockerfile and registers a Host(`${MCP_HOST:-mcp.your-domain.tld}`) router
 # with HTTP-01 Let's Encrypt via the existing letsencrypt cert resolver.
 services:
   mcp:
@@ -20,14 +20,14 @@ services:
       - "traefik.docker.network=traefik-public"
 
       # HTTP -> HTTPS redirect
-      - "traefik.http.routers.boniforce-mcp-http.rule=Host(`mcp.boniforce.de`)"
+      - "traefik.http.routers.boniforce-mcp-http.rule=Host(`${MCP_HOST:-mcp.your-domain.tld}`)"
       - "traefik.http.routers.boniforce-mcp-http.entrypoints=web"
       - "traefik.http.routers.boniforce-mcp-http.middlewares=boniforce-mcp-redirect"
       - "traefik.http.middlewares.boniforce-mcp-redirect.redirectscheme.scheme=https"
       - "traefik.http.middlewares.boniforce-mcp-redirect.redirectscheme.permanent=true"
 
       # HTTPS router with Let's Encrypt
-      - "traefik.http.routers.boniforce-mcp.rule=Host(`mcp.boniforce.de`)"
+      - "traefik.http.routers.boniforce-mcp.rule=Host(`${MCP_HOST:-mcp.your-domain.tld}`)"
       - "traefik.http.routers.boniforce-mcp.entrypoints=websecure"
       - "traefik.http.routers.boniforce-mcp.tls=true"
       - "traefik.http.routers.boniforce-mcp.tls.certresolver=letsencrypt"

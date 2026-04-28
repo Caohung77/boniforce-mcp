@@ -1,6 +1,6 @@
 # Caddyfile — auto Let's Encrypt for Boniforce MCP.
-# Replace mcp.example.com with your subdomain.
-mcp.boniforce.de {
+# Replace mcp.your-domain.tld with the subdomain you control.
+mcp.your-domain.tld {
     encode gzip
     reverse_proxy 127.0.0.1:8000
 }
