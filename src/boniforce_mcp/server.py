@@ -58,9 +58,21 @@ def _make_mcp() -> FastMCP:
     mcp = FastMCP(
         name="Boniforce",
         instructions=(
-            "Tools for the Boniforce credit/financial-data API. "
-            "Use search_companies first to find a company's register details, "
-            "then create_report or get_financial_data with those identifiers."
+            "Tools for the Boniforce credit/financial-data API for German companies.\n\n"
+            "CORRECT WORKFLOW (always follow this order):\n"
+            "  1. search_companies(query) -> get register_type, register_number, register_court\n"
+            "  2. create_report(company_name, register_type, register_number, register_court)\n"
+            "     -> returns job_id + report_id, status='queued'\n"
+            "  3. get_job_status(job_id) -> poll until status='finished' (typically 30-120s)\n"
+            "  4. get_report(report_id) -> Boniscore (0-100), credit_limit, assessment\n"
+            "  5. get_report_financial_data(report_id) -> balance sheet history\n"
+            "  6. get_report_financial_analysis(report_id) -> ratios + per-year sub-scores\n\n"
+            "list_reports() shows previously generated reports for the account.\n\n"
+            "IMPORTANT: there is no 'live' financial-data lookup outside the report flow. "
+            "If a Boniscore is requested, you MUST create a report and wait for it. "
+            "404 from get_report_* means no Bundesanzeiger annual filing exists yet for "
+            "that company; report it back to the user as a data-availability issue, not "
+            "an API error."
         ),
         auth=_build_verifier(),
     )
@@ -85,7 +97,10 @@ def _make_mcp() -> FastMCP:
 
     @mcp.tool
     async def search_companies(query: str) -> Any:
-        """Search the Boniforce database for companies by name or identifier."""
+        """Step 1 of Boniscore workflow: search Boniforce for a German company by
+        name or partial name. Returns company entries each with company_name,
+        register_type (e.g. HRB, HRA, VR), register_number, register_court.
+        Pass these four fields verbatim into create_report next."""
         _, token = await _user_token()
         try:
             return await _bf_client_from_state().search_companies(token, query)
@@ -94,7 +109,9 @@ def _make_mcp() -> FastMCP:
 
     @mcp.tool
     async def list_reports() -> Any:
-        """List all credit reports previously generated for the authenticated account."""
+        """List previously generated reports for the account. Useful to check
+        whether a company already has a finished report (avoids re-running
+        create_report). Returns name, report_id, status, created_at."""
         _, token = await _user_token()
         try:
             return await _bf_client_from_state().list_reports(token)
@@ -109,7 +126,10 @@ def _make_mcp() -> FastMCP:
         register_court: str,
         session_id: str | None = None,
     ) -> Any:
-        """Create a new Boniforce credit report. Returns a job/report identifier; poll get_job_status."""
+        """Step 2 of Boniscore workflow: kick off report generation for a German
+        company. All four register fields come from search_companies output
+        and must be passed verbatim. Returns job_id + report_id with
+        status='queued'. Then call get_job_status(job_id) until finished."""
         _, token = await _user_token()
         try:
             return await _bf_client_from_state().create_report(
@@ -125,7 +145,11 @@ def _make_mcp() -> FastMCP:
 
     @mcp.tool
     async def get_report(report_id: str) -> Any:
-        """Fetch a finished Boniforce report by its report_id."""
+        """Step 4 of Boniscore workflow: fetch a finished report. Returns the
+        Boniscore (0-100, higher=better creditworthiness), score_details
+        (label/color), credit_limit, credit_assessment_result (APPROVE / DECLINE /
+        REVIEW), and per-criterion assessments. Only call once get_job_status
+        reports status='finished'."""
         _, token = await _user_token()
         try:
             return await _bf_client_from_state().get_report(token, report_id)
@@ -134,7 +158,9 @@ def _make_mcp() -> FastMCP:
 
     @mcp.tool
     async def get_job_status(job_id: str) -> Any:
-        """Check the status of an asynchronous report-generation job."""
+        """Step 3 of Boniscore workflow: poll a report-generation job. status
+        moves queued -> running -> finished (or failed). Typical time
+        30-120s. Once finished, call get_report(report_id)."""
         _, token = await _user_token()
         try:
             return await _bf_client_from_state().get_job_status(token, job_id)
@@ -142,52 +168,11 @@ def _make_mcp() -> FastMCP:
             raise _wrap(e)
 
     @mcp.tool
-    async def get_financial_data(
-        company_name: str,
-        register_type: str,
-        register_number: str,
-        register_court: str,
-        session_id: str | None = None,
-    ) -> Any:
-        """Get raw financial data for a company by register identifiers."""
-        _, token = await _user_token()
-        try:
-            return await _bf_client_from_state().get_financial_data(
-                token,
-                company_name=company_name,
-                register_type=register_type,
-                register_number=register_number,
-                register_court=register_court,
-                session_id=session_id,
-            )
-        except BoniforceError as e:
-            raise _wrap(e)
-
-    @mcp.tool
-    async def get_financial_analysis(
-        company_name: str,
-        register_type: str,
-        register_number: str,
-        register_court: str,
-        session_id: str | None = None,
-    ) -> Any:
-        """Get Boniforce's financial-data analysis and credit score for a company."""
-        _, token = await _user_token()
-        try:
-            return await _bf_client_from_state().get_financial_analysis(
-                token,
-                company_name=company_name,
-                register_type=register_type,
-                register_number=register_number,
-                register_court=register_court,
-                session_id=session_id,
-            )
-        except BoniforceError as e:
-            raise _wrap(e)
-
-    @mcp.tool
     async def get_report_financial_data(report_id: str) -> Any:
-        """Fetch the financial data attached to an existing report."""
+        """Optional drill-down: balance-sheet history for a finished report.
+        Returns yearly Eigenkapital, Verbindlichkeiten, Bilanzsumme, etc.
+        from the Bundesanzeiger filings the score is built on. 404 means
+        no annual filings indexed for the company yet."""
         _, token = await _user_token()
         try:
             return await _bf_client_from_state().get_report_financial_data(token, report_id)
@@ -196,7 +181,9 @@ def _make_mcp() -> FastMCP:
 
     @mcp.tool
     async def get_report_financial_analysis(report_id: str) -> Any:
-        """Fetch the financial-analysis section of an existing report."""
+        """Optional drill-down: per-year financial ratios + sub-scores
+        (Eigenkapitalquote, Verbindlichkeitenquote, etc.) underlying the
+        Boniscore. 404 means no annual filings indexed for the company yet."""
         _, token = await _user_token()
         try:
             return await _bf_client_from_state().get_report_financial_analysis(token, report_id)
