@@ -266,7 +266,7 @@ async def register_client(request: Request) -> JSONResponse:
 
 async def authorize(request: Request) -> Response:
     params = request.query_params
-    required = ("response_type", "client_id", "redirect_uri", "code_challenge")
+    required = ("response_type", "client_id", "redirect_uri")
     if any(p not in params for p in required):
         return JSONResponse(
             {"error": "invalid_request", "error_description": "missing required parameter"},
@@ -274,14 +274,23 @@ async def authorize(request: Request) -> Response:
         )
     if params["response_type"] != "code":
         return JSONResponse({"error": "unsupported_response_type"}, status_code=400)
-    if params.get("code_challenge_method", "plain") != "S256":
-        return JSONResponse({"error": "invalid_request", "error_description": "S256 required"}, status_code=400)
 
-    client = await storage.get_client(params["client_id"])
+    client_id = params["client_id"].strip()
+    client = await storage.get_client(client_id)
     if not client:
         return JSONResponse({"error": "unauthorized_client"}, status_code=400)
     if params["redirect_uri"] not in client.redirect_uris:
         return JSONResponse({"error": "invalid_request", "error_description": "redirect_uri mismatch"}, status_code=400)
+
+    # PKCE: required for public clients (no secret), optional for confidential.
+    has_challenge = "code_challenge" in params
+    if not client.has_secret and not has_challenge:
+        return JSONResponse(
+            {"error": "invalid_request", "error_description": "code_challenge required for public clients"},
+            status_code=400,
+        )
+    if has_challenge and params.get("code_challenge_method", "plain") != "S256":
+        return JSONResponse({"error": "invalid_request", "error_description": "S256 required"}, status_code=400)
 
     user_id = _read_session(request)
     if not user_id:
@@ -293,10 +302,10 @@ async def authorize(request: Request) -> Response:
     code = secrets.token_urlsafe(32)
     await storage.save_auth_code(
         code=code,
-        client_id=params["client_id"],
+        client_id=client_id,
         user_id=user_id,
-        code_challenge=params["code_challenge"],
-        code_challenge_method=params.get("code_challenge_method", "S256"),
+        code_challenge=params.get("code_challenge", ""),
+        code_challenge_method=params.get("code_challenge_method", "none"),
         redirect_uri=params["redirect_uri"],
         scope=params.get("scope", "mcp"),
     )
@@ -398,13 +407,17 @@ async def _grant_authorization_code(form, request: Request) -> JSONResponse:
     code = form.get("code")
     redirect_uri = form.get("redirect_uri")
     code_verifier = form.get("code_verifier")
-    if not code or not redirect_uri or not code_verifier:
+    if not code or not redirect_uri:
         return JSONResponse({"error": "invalid_request"}, status_code=400)
     record = await storage.consume_auth_code(code, client_id, redirect_uri)
     if not record:
         return JSONResponse({"error": "invalid_grant"}, status_code=400)
-    if not _verify_pkce(code_verifier, record["code_challenge"], record["code_challenge_method"]):
-        return JSONResponse({"error": "invalid_grant", "error_description": "PKCE failed"}, status_code=400)
+    # PKCE check only when challenge was provided at authorize time.
+    if record["code_challenge"]:
+        if not code_verifier or not _verify_pkce(
+            code_verifier, record["code_challenge"], record["code_challenge_method"]
+        ):
+            return JSONResponse({"error": "invalid_grant", "error_description": "PKCE failed"}, status_code=400)
 
     access, ttl = _issue_access_token(record["user_id"], client_id, record["scope"])
     refresh_raw, refresh_hash = _issue_refresh_token()
