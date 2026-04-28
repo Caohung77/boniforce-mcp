@@ -1,84 +1,159 @@
-# Boniforce MCP
+# Boniforce for ChatGPT & Claude
 
-Remote **Model Context Protocol** server that wraps the
-[Boniforce API](https://api.boniforce.de/v1/docs) and exposes its endpoints as
-tools usable from **Claude.ai Custom Connectors** and **ChatGPT Connectors**.
+**Bring instant German credit checks straight into your AI chat.**
 
-The server speaks MCP Streamable HTTP and ships its own OAuth 2.1
-authorization server (PKCE + Dynamic Client Registration), so it satisfies
-both Claude's and ChatGPT's connector requirements out of the box.
+Ask ChatGPT or Claude *"What's the Boniscore of Müller GmbH?"* and get a real
+answer — pulled live from [Boniforce](https://api.boniforce.de) — in seconds.
+No tab-switching, no copy-paste, no extra logins.
 
 ---
 
-## Use it (for Boniforce customers)
+## What you get
 
-You don't need to install anything. The official Boniforce-hosted instance is at:
+🔍 **Search any German company by name** — Claude finds the register entry for
+you, no manual HRB lookup.
+
+📊 **Boniscore + credit-limit recommendation on demand** — score from 0–100,
+APPROVE / REVIEW / DECLINE verdict, conservative + balanced + aggressive
+credit-limit scenarios.
+
+📑 **Drill into the numbers** — balance-sheet history (Eigenkapital,
+Verbindlichkeiten, Bilanzsumme…) and per-year financial ratios, all from
+Bundesanzeiger filings.
+
+⚡ **Works mid-conversation** — the model decides when to call Boniforce, so
+you can ask follow-ups in plain language: *"Compare it to last year"*,
+*"Should I raise the limit?"*, *"Spit out an email to the customer."*
+
+🔐 **Your data stays yours** — the connector uses your personal Boniforce
+API key. We never see passwords. Revoke access in one click from your
+Boniforce dashboard.
+
+---
+
+## Connect in 3 steps
+
+> Works in **Claude.ai** (web + desktop) and **ChatGPT** (Pro / Team / Enterprise).
+> The Boniforce-hosted server is at `https://mcp.boniforce.de/mcp`.
+
+**1. Settings → Connectors → Add custom connector.**
+
+**2. Paste this URL:**
 
 ```
 https://mcp.boniforce.de/mcp
 ```
 
-### Add to Claude
+**3. A browser window opens — paste your Boniforce API key. Done.**
 
-1. Open [claude.ai](https://claude.ai) → **Settings → Connectors → Add custom connector**.
-2. Paste the URL above.
-3. A browser tab opens — paste your **Boniforce API key**.
-4. The Boniforce tools appear in your chat.
+The Boniforce tools now show up in your chat sidebar. Try a prompt:
 
-### Add to ChatGPT
+> *"Erstelle mir einen Boniforce-Bericht für die Boniforce GmbH und gib mir Score und Kreditlimit."*
 
-Settings → **Connectors → Add** → paste the same URL. The OAuth flow is identical.
+> *"Search Boniforce for SAP SE and tell me the latest score."*
 
-### Don't have an API key yet?
-
-Generate one in your Boniforce dashboard. The API key is the only credential
-the connector needs — no separate MCP password to manage.
+> *"List the last five reports I generated."*
 
 ---
 
-## Tools
+## Frequently asked
 
-After connecting, your AI assistant can call any of these:
+**Do I need a separate password for the connector?**
+No. Your Boniforce API key is the only credential. We validate it against
+your Boniforce account when you paste it; that's it.
 
-| Tool                              | What it does                                                       |
-|-----------------------------------|--------------------------------------------------------------------|
-| `search_companies`                | Find a German company by name; returns register details.           |
-| `create_report`                   | Kick off Boniscore generation for a company.                       |
-| `get_job_status`                  | Poll a running report job until finished.                          |
-| `get_report`                      | Fetch the finished report: Boniscore, credit limit, assessment.    |
-| `get_report_financial_data`       | Drill into the underlying balance-sheet history.                   |
-| `get_report_financial_analysis`   | Drill into per-year financial ratios + sub-scores.                 |
-| `list_reports`                    | List previously generated reports for the account.                 |
+**Where do I get my API key?**
+Log in to your Boniforce dashboard. The key starts with `sk_live-…`. If you
+don't have one yet, contact your Boniforce admin.
 
-The assistant follows the workflow: **search → create_report → poll → get_report**.
+**How long does a credit check take?**
+A new report typically completes in **30–120 seconds** (the system pulls and
+analyses Bundesanzeiger filings on demand). The model polls automatically
+and tells you when it's ready.
 
-Example prompt:
+**Will my chat history be sent to Boniforce?**
+No. The model only sends Boniforce the company identifiers it needs (name +
+HRB number). Your conversation stays between you and Anthropic / OpenAI.
 
-> *"What's the Boniscore and credit limit for Boniforce GmbH?"*
+**Can I revoke access?**
+Yes — anywhere your Boniforce key can be rotated. As soon as the key is
+invalidated, the connector stops working until you paste a new one.
+
+**Does it work on the free Claude / free ChatGPT plans?**
+Custom connectors are currently a paid-tier feature for both products
+(Claude.ai paid plans, ChatGPT Pro / Team / Enterprise).
+
+**Can my whole team share one MCP server?**
+Yes. Each teammate adds the same URL `https://mcp.boniforce.de/mcp` and
+pastes their own Boniforce API key. Their data is isolated by API-key
+identity — no shared sessions.
 
 ---
 
-## Self-hosting
+## What you can ask the AI to do
 
-Anyone can run their own instance against `api.boniforce.de` — useful for
-private routing, self-controlled OAuth, or development.
+| Plain-English ask                                            | What happens under the hood |
+|--------------------------------------------------------------|------------------------------|
+| *"Find Müller GmbH on Boniforce."*                           | `search_companies`          |
+| *"Get me the Boniscore for HRB 12345 in München."*           | `create_report` → `get_job_status` (poll) → `get_report` |
+| *"Show me the balance-sheet history."*                       | `get_report_financial_data` |
+| *"What's the equity ratio trend the last three years?"*      | `get_report_financial_analysis` |
+| *"Which reports did I generate this week?"*                  | `list_reports`              |
 
-### Requirements
+The agent picks the right tool sequence on its own — you just describe what
+you want in plain language (German or English).
 
-* A Linux host with Docker + Docker Compose
-* A public domain pointing to the host (Let's Encrypt needs port 80/443)
-* A Boniforce API token for each user you'll provision
+---
+
+<details>
+<summary><strong>For developers / IT — self-hosting, internals, source code</strong></summary>
+
+This repo is the open-source server behind `mcp.boniforce.de`. You can run
+your own instance for private routing, custom OAuth, or development.
+
+### Architecture
+
+```
+ChatGPT / Claude  ──HTTPS──▶  reverse proxy (Caddy or Traefik)
+                                   │
+                                   ▼
+                              FastMCP server (Python 3.11)
+                                   │
+                                   ├─ OAuth 2.1 + DCR + PKCE  (auth.py)
+                                   ├─ MCP Streamable HTTP    (server.py)
+                                   ├─ httpx wrapper          (boniforce_client.py)
+                                   └─ SQLite + Fernet        (storage.py, crypto.py)
+                                   │
+                                   ▼
+                              api.boniforce.de
+```
+
+The Boniforce API key submitted by a user is validated against
+`api.boniforce.de`, then encrypted at rest. The user identifier is
+`sha256(token)` — same key on a different device = same MCP user.
+
+### Tools exposed via MCP
+
+| Tool                              | HTTP                                                            |
+|-----------------------------------|-----------------------------------------------------------------|
+| `search_companies`                | `GET /v1/search`                                                |
+| `list_reports`                    | `GET /v1/reports`                                               |
+| `create_report`                   | `POST /v1/reports`                                              |
+| `get_report`                      | `GET /v1/reports/{report_id}`                                   |
+| `get_job_status`                  | `GET /v1/jobs/{job_id}/status`                                  |
+| `get_report_financial_data`       | `GET /v1/reports/{report_id}/financial_data`                    |
+| `get_report_financial_analysis`   | `GET /v1/reports/{report_id}/financial_data/analysis`           |
 
 ### Quick deploy (Docker + Caddy)
+
+Requirements: Linux host, Docker + Compose, public domain pointing at the host.
 
 ```bash
 git clone https://github.com/Caohung77/boniforce-mcp
 cd boniforce-mcp/deploy
 
-# Edit Caddyfile: replace the example domain with yours
-sed -i 's/mcp\.boniforce\.de/your.domain.tld/' Caddyfile
+sed -i 's/mcp\.your-domain\.tld/your.domain.tld/' Caddyfile
 
-# Generate secrets and write .env (one-time)
 cat > ../.env <<EOF
 BF_ISSUER_URL=https://your.domain.tld
 BF_DB_PATH=/var/lib/boniforce-mcp/db.sqlite
@@ -93,61 +168,30 @@ chmod 600 ../.env
 docker compose up -d --build
 ```
 
-The connector URL is now `https://your.domain.tld/mcp`. Users self-provision
-by pasting their Boniforce API key on first connection — no admin step needed.
+Connector URL: `https://your.domain.tld/mcp`. Users self-provision on first
+connect — no admin commands.
 
 ### Behind an existing Traefik
 
-If your host already runs Traefik on a `traefik-public` network with an
-`letsencrypt` cert resolver, use the labelled compose file instead — no Caddy:
-
 ```bash
+MCP_HOST=mcp.your-domain.tld \
 docker compose -f deploy/docker-compose.traefik.yml up -d --build
 ```
 
-Adjust the `Host(...)` rule in `docker-compose.traefik.yml` to your domain.
+The compose file registers a `Host(${MCP_HOST})` router on the existing
+`traefik-public` network with the `letsencrypt` cert resolver.
 
 ### Local development
 
 ```bash
 python3.11 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-
-boniforce-mcp genkey > /dev/null   # confirms install
-cat > .env <<EOF
-BF_ISSUER_URL=http://localhost:8000
-BF_DB_PATH=./boniforce-mcp.sqlite
-BF_ENCRYPTION_KEY=$(boniforce-mcp genkey)
-BF_OAUTH_SIGNING_KEY="$(boniforce-mcp gensigning | awk 'BEGIN{ORS="\\n"}1')"
-BF_API_BASE=https://api.boniforce.de
-EOF
-
+pytest                        # 10 tests
 uvicorn boniforce_mcp.server:app --port 8000
-# Open http://localhost:8000/oauth/authorize?... in MCP Inspector;
-# the API-key form will accept any token api.boniforce.de validates.
-```
-
-Probe with the official MCP Inspector:
-
-```bash
 npx @modelcontextprotocol/inspector http://localhost:8000/mcp
 ```
 
----
-
-## CLI
-
-```
-boniforce-mcp genkey         # Fernet key for BF_ENCRYPTION_KEY
-boniforce-mcp gensigning     # RSA private key for BF_OAUTH_SIGNING_KEY
-boniforce-mcp initdb         # create SQLite schema (idempotent)
-boniforce-mcp listusers      # list users (synthetic emails for token-only flow)
-```
-
-In the standard flow users are auto-provisioned from their Boniforce API key
-on first connection — no admin commands needed.
-
-## Endpoints
+### Endpoints
 
 | Path                                           | Purpose                                |
 |------------------------------------------------|----------------------------------------|
@@ -160,29 +204,36 @@ on first connection — no admin commands needed.
 | `/oauth/token`                                 | Token endpoint                         |
 | `/jwks.json`                                   | JSON Web Key Set                       |
 
-## Testing
+### Security model
+
+* The Boniforce API key is the only user credential. Validated against
+  `api.boniforce.de` on every connect, stored Fernet-encrypted in SQLite.
+* User identity = `sha256(token)`. Same key on a different device = same user.
+* OAuth access tokens: short-lived (1 h) RS256 JWTs, audience-bound to the
+  canonical MCP resource URL. Refresh tokens: opaque, single-use, hashed.
+* PKCE mandatory (`S256`); `plain` rejected per OAuth 2.1.
+* TLS terminated at the reverse proxy; the application listens only on the
+  internal port.
+
+### Tests
 
 ```bash
-pip install -e ".[dev]"
 pytest
 ```
 
-Tests cover the httpx client (mocked Boniforce backend), the full OAuth 2.1
-PKCE flow including DCR + refresh, PKCE failure rejection, and JWKS shape.
+Covers the httpx client (mocked Boniforce backend), the full OAuth 2.1 PKCE
+flow including DCR + refresh, invalid-token rejection, PKCE failure
+rejection, and JWKS shape.
 
-## Security
+</details>
 
-* The Boniforce API key is the only user credential. It is validated against
-  `api.boniforce.de` on every login form submission and stored Fernet-encrypted
-  in SQLite (encryption key in `.env`, chmod 600, owned by the service user).
-* The user identifier is `sha256(token)` — same key on a different device maps
-  to the same MCP user.
-* OAuth access tokens are short-lived (1 h) RS256 JWTs bound to the canonical
-  MCP resource URL. Refresh tokens are opaque, single-use, hashed in DB.
-* PKCE mandatory (`S256` only); `plain` rejected per OAuth 2.1.
-* Reverse proxy (Caddy or Traefik) handles TLS; the application listens only
-  on the internal port.
+---
 
 ## License
 
-MIT.
+[MIT](LICENSE).
+
+## Contact
+
+Issues + PRs welcome here. For Boniforce account questions or partnerships:
+contact your Boniforce account manager.
