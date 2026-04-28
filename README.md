@@ -31,22 +31,41 @@ Boniforce dashboard.
 
 ---
 
-## Connect in 3 steps
+## Connect
 
-> Works in **Claude.ai** (web + desktop) and **ChatGPT** (Pro / Team / Enterprise).
-> The Boniforce-hosted server is at `https://mcp.boniforce.de/mcp`.
-
-**1. Settings → Connectors → Add custom connector.**
-
-**2. Paste this URL:**
+The Boniforce-hosted server is at:
 
 ```
 https://mcp.boniforce.de/mcp
 ```
 
-**3. A browser window opens — paste your Boniforce API key. Done.**
+### Add to Claude (Claude.ai web or Claude Desktop)
 
-The Boniforce tools now show up in your chat sidebar. Try a prompt:
+1. Open **Settings → Connectors → Add custom connector**.
+2. Paste the URL above.
+3. A browser window opens — paste your **Boniforce API key**. Done.
+
+### Add to ChatGPT (Pro, Plus, Business, Enterprise, Education)
+
+ChatGPT's custom MCP connectors are in **beta** and live behind Developer Mode.
+You need to enable it once:
+
+1. **chatgpt.com → Settings → Apps & Connectors**.
+2. **Erweiterte Einstellungen → Entwicklermodus** (Advanced settings → Developer mode) → toggle **on**.
+3. Back at the top of *Apps & Connectors*, click **App erstellen** (Create app).
+4. Fill the form:
+   - **Name**: `Boniforce`
+   - **Beschreibung** *(optional)*: e.g. *Sofort-Bonitätsprüfungen für deutsche Firmen — Boniscore, Kreditlimit, Bilanzanalyse.*
+   - **URL des MCP-Servers**: `https://mcp.boniforce.de/mcp` *(the `/mcp` suffix is required — ignore the `/sse` placeholder)*
+   - **Authentifizierung**: **OAuth** *(leave Erweiterte OAuth-Einstellungen closed — auto-discovery handles it)*
+5. Save → a browser window opens → paste your **Boniforce API key**. Done.
+
+> Custom connectors are currently **web-only** in ChatGPT and not yet exposed
+> on the free tier.
+
+### Try it
+
+The Boniforce tools now appear in your chat sidebar. Sample prompts:
 
 > *"Erstelle mir einen Boniforce-Bericht für die Boniforce GmbH und gib mir Score und Kreditlimit."*
 
@@ -80,8 +99,11 @@ Yes — anywhere your Boniforce key can be rotated. As soon as the key is
 invalidated, the connector stops working until you paste a new one.
 
 **Does it work on the free Claude / free ChatGPT plans?**
-Custom connectors are currently a paid-tier feature for both products
-(Claude.ai paid plans, ChatGPT Pro / Team / Enterprise).
+Custom connectors are paid-tier features.
+- **Claude**: paid Claude.ai plans (web + desktop).
+- **ChatGPT**: Pro, Plus, Business, Enterprise, Education on
+  [chatgpt.com](https://chatgpt.com) — currently in beta and gated behind
+  *Settings → Apps → Advanced settings → Developer mode*.
 
 **Can my whole team share one MCP server?**
 Yes. Each teammate adds the same URL `https://mcp.boniforce.de/mcp` and
