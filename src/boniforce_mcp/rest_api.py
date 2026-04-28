@@ -218,7 +218,35 @@ def _openapi_spec() -> dict[str, Any]:
                 },
                 "Report": {
                     "type": "object",
-                    "additionalProperties": True,
+                    "properties": {
+                        "report_id": {"type": "string"},
+                        "version": {"type": "number"},
+                        "score": {"type": "number", "description": "Boniscore 0–100; higher = lower risk."},
+                        "score_details": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string"},
+                                "color_code": {"type": "integer"},
+                            },
+                        },
+                        "credit_limit": {"type": "number"},
+                        "credit_assessment_result": {
+                            "type": "string",
+                            "description": "APPROVE / REVIEW / DECLINE",
+                        },
+                    },
+                },
+                "JobStatus": {
+                    "type": "object",
+                    "properties": {
+                        "job_id": {"type": "string"},
+                        "report_id": {"type": "string"},
+                        "status": {
+                            "type": "string",
+                            "description": "queued | running | completed | failed",
+                        },
+                        "error_message": {"type": "string", "nullable": True},
+                    },
                 },
                 "Error": {
                     "type": "object",
