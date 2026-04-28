@@ -83,6 +83,24 @@ class BoniforceClient:
     async def get_job_status(self, token: str, job_id: str) -> Any:
         return await self._request("GET", f"/v1/jobs/{job_id}/status", token)
 
+    async def wait_for_job(
+        self, token: str, job_id: str, max_wait_s: float = 40.0, poll_every_s: float = 3.0
+    ) -> Any:
+        """Poll get_job_status until terminal state or max_wait_s exceeded."""
+        import asyncio
+        import time
+
+        deadline = time.monotonic() + max_wait_s
+        last = None
+        while True:
+            last = await self.get_job_status(token, job_id)
+            status = (last or {}).get("status", "").lower()
+            if status in ("completed", "finished", "failed", "error"):
+                return last
+            if time.monotonic() >= deadline:
+                return last
+            await asyncio.sleep(poll_every_s)
+
     async def get_financial_data(
         self,
         token: str,

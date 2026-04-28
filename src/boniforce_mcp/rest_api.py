@@ -119,6 +119,24 @@ async def create_report(request: Request) -> Response:
         )
     except Exception as exc:
         return _err(502, f"Boniforce upstream: {exc}")
+    # Optional inline wait: ?wait=N seconds (max 40). When set, we poll
+    # get_job_status server-side and additionally fetch the finished report
+    # so the caller gets a one-shot answer instead of needing to poll.
+    wait_param = request.query_params.get("wait")
+    if wait_param and data.get("job_id"):
+        try:
+            wait_s = max(0.0, min(40.0, float(wait_param)))
+        except ValueError:
+            wait_s = 0.0
+        if wait_s > 0:
+            client = _client_holder()
+            status = await client.wait_for_job(token, data["job_id"], max_wait_s=wait_s)
+            data["final_status"] = status
+            if (status or {}).get("status", "").lower() in ("completed", "finished") and data.get("report_id"):
+                try:
+                    data["report"] = await client.get_report(token, data["report_id"])
+                except Exception:
+                    pass
     return JSONResponse(data)
 
 
@@ -141,8 +159,13 @@ async def get_job_status(request: Request) -> Response:
     except HTTPError as e:
         return _err(e.status, e.message)
     job_id = request.path_params["job_id"]
+    wait_param = request.query_params.get("wait")
     try:
-        data = await _client_holder().get_job_status(token, job_id)
+        if wait_param:
+            wait_s = max(0.0, min(40.0, float(wait_param)))
+            data = await _client_holder().wait_for_job(token, job_id, max_wait_s=wait_s)
+        else:
+            data = await _client_holder().get_job_status(token, job_id)
     except Exception as exc:
         return _err(502, f"Boniforce upstream: {exc}")
     return JSONResponse(data)
@@ -292,7 +315,21 @@ def _openapi_spec() -> dict[str, Any]:
                 },
                 "post": {
                     "operationId": "createReport",
-                    "summary": "Kick off Boniscore generation. Returns job_id + report_id, status='queued'.",
+                    "summary": (
+                        "Kick off Boniscore generation. Returns job_id + report_id. "
+                        "Pass ?wait=40 (seconds, max 40) to have the server poll until the "
+                        "report finishes and inline the finished report in the response — "
+                        "saves the model from polling and avoids ChatGPT Action timeouts."
+                    ),
+                    "parameters": [
+                        {
+                            "in": "query",
+                            "name": "wait",
+                            "required": False,
+                            "schema": {"type": "integer", "minimum": 0, "maximum": 40},
+                            "description": "Seconds to wait server-side for the report to finish (0-40).",
+                        }
+                    ],
                     "requestBody": {
                         "required": True,
                         "content": {
@@ -316,7 +353,7 @@ def _openapi_spec() -> dict[str, Any]:
                             }
                         },
                     },
-                    "responses": {"200": {"description": "Job accepted."}},
+                    "responses": {"200": {"description": "Job accepted (and possibly inlined report when wait used)."}},
                 },
             },
             "/api/v1/reports/{report_id}": {
@@ -337,14 +374,25 @@ def _openapi_spec() -> dict[str, Any]:
             "/api/v1/jobs/{job_id}/status": {
                 "get": {
                     "operationId": "getJobStatus",
-                    "summary": "Poll a report-generation job (queued -> running -> completed).",
+                    "summary": (
+                        "Poll a report-generation job (queued -> running -> completed). "
+                        "Pass ?wait=40 to long-poll server-side instead of repeatedly calling. "
+                        "Always returns within ~40s and includes the latest status."
+                    ),
                     "parameters": [
                         {
                             "in": "path",
                             "name": "job_id",
                             "required": True,
                             "schema": {"type": "string"},
-                        }
+                        },
+                        {
+                            "in": "query",
+                            "name": "wait",
+                            "required": False,
+                            "schema": {"type": "integer", "minimum": 0, "maximum": 40},
+                            "description": "Seconds to wait server-side for status change (0-40).",
+                        },
                     ],
                     "responses": {"200": {"description": "OK"}},
                 }
