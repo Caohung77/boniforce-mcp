@@ -166,41 +166,23 @@ def _read_session(request: Request) -> str | None:
 
 # ---------------- HTML helpers ----------------
 
-def _login_page(redirect_to: str, error: str | None = None) -> str:
+def _apikey_page(redirect_to: str, error: str | None = None) -> str:
     err = (
         f'<p style="color:#d52b2a;margin:0 0 12px">{error}</p>' if error else ""
     )
     return f"""<!doctype html><html><head><meta charset=utf-8>
-<title>Boniforce MCP — Sign in</title>
-<style>body{{font-family:system-ui,sans-serif;max-width:380px;margin:80px auto;padding:24px}}
-input{{width:100%;padding:10px;margin:6px 0 14px;border:1px solid #ccc;border-radius:6px;font-size:14px;box-sizing:border-box}}
+<title>Boniforce MCP — Connect</title>
+<style>body{{font-family:system-ui,sans-serif;max-width:460px;margin:80px auto;padding:24px}}
+textarea{{width:100%;padding:10px;margin:6px 0 14px;border:1px solid #ccc;border-radius:6px;font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;box-sizing:border-box}}
 button{{width:100%;padding:10px;background:#009485;color:#fff;border:0;border-radius:6px;font-size:15px;cursor:pointer}}
-h1{{margin:0 0 18px;font-size:20px}}</style></head><body>
-<h1>Sign in to Boniforce MCP</h1>{err}
-<form method=POST action="/oauth/login">
+h1{{margin:0 0 8px;font-size:20px}} p.hint{{color:#666;font-size:13px;margin:0 0 18px;line-height:1.5}}
+a{{color:#009485}}</style></head><body>
+<h1>Connect Boniforce to Claude / ChatGPT</h1>
+<p class=hint>Paste your <strong>Boniforce API key</strong> below. It is the only credential needed — we validate it against your Boniforce account and store it encrypted. You can revoke it any time from the Boniforce dashboard.</p>
+{err}<form method=POST action="/oauth/login">
 <input type=hidden name=continue value="{redirect_to}">
-<label>Email<input name=email type=email required autofocus></label>
-<label>Password<input name=password type=password required></label>
-<button>Sign in</button></form></body></html>"""
-
-
-def _setup_page(error: str | None = None, redirect_to: str = "/") -> str:
-    err = (
-        f'<p style="color:#d52b2a;margin:0 0 12px">{error}</p>' if error else ""
-    )
-    return f"""<!doctype html><html><head><meta charset=utf-8>
-<title>Boniforce MCP — Link API key</title>
-<style>body{{font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;padding:24px}}
-input,textarea{{width:100%;padding:10px;margin:6px 0 14px;border:1px solid #ccc;border-radius:6px;font-size:14px;box-sizing:border-box;font-family:inherit}}
-button{{width:100%;padding:10px;background:#009485;color:#fff;border:0;border-radius:6px;font-size:15px;cursor:pointer}}
-h1{{margin:0 0 8px;font-size:20px}} p.hint{{color:#666;font-size:13px;margin:0 0 18px}}</style></head><body>
-<h1>Link your Boniforce API key</h1>
-<p class=hint>Paste the API token from your Boniforce account. It will be encrypted at rest and used only for your MCP requests.</p>
-{err}<form method=POST action="/setup">
-<input type=hidden name=continue value="{redirect_to}">
-<label>Boniforce API token<textarea name=token rows=3 required></textarea></label>
-<label>Label (optional)<input name=label placeholder="e.g. work account"></label>
-<button>Save and continue</button></form></body></html>"""
+<label>Boniforce API key<textarea name=token rows=3 required autofocus placeholder="sk_live-..."></textarea></label>
+<button>Connect</button></form></body></html>"""
 
 
 # ---------------- Route handlers ----------------
@@ -303,17 +285,11 @@ async def authorize(request: Request) -> Response:
 
     user_id = _read_session(request)
     if not user_id:
-        # Show login; preserve full /authorize URL as continue.
+        # Show API-key form; preserve full /authorize URL as continue.
         cont = f"/oauth/authorize?{urlencode(params)}"
-        return HTMLResponse(_login_page(cont))
+        return HTMLResponse(_apikey_page(cont))
 
-    # Logged in but no Boniforce token yet → show /setup, return here after.
-    bf = await storage.get_bf_token(user_id)
-    if not bf:
-        cont = f"/oauth/authorize?{urlencode(params)}"
-        return HTMLResponse(_setup_page(redirect_to=cont))
-
-    # All good: mint code, redirect.
+    # Token-based session implies BF token is already linked. All good: mint code.
     code = secrets.token_urlsafe(32)
     await storage.save_auth_code(
         code=code,
@@ -332,38 +308,53 @@ async def authorize(request: Request) -> Response:
 
 
 async def login(request: Request) -> Response:
-    form = await request.form()
-    email = (form.get("email") or "").strip()
-    password = form.get("password") or ""
-    cont = form.get("continue") or "/"
-    user = await storage.verify_user(email, password)
-    if not user:
-        return HTMLResponse(_login_page(cont, error="Invalid email or password"), status_code=401)
-    resp = RedirectResponse(cont, status_code=302)
-    _set_session(resp, user.id)
-    return resp
+    """Validate a Boniforce API token by hitting api.boniforce.de.
+    Valid token => upsert a token-keyed user, set session, redirect on."""
+    import hashlib
 
+    import httpx
 
-async def setup_get(request: Request) -> Response:
-    user_id = _read_session(request)
-    if not user_id:
-        return RedirectResponse("/oauth/login_required", status_code=302)
-    cont = request.query_params.get("continue", "/")
-    return HTMLResponse(_setup_page(redirect_to=cont))
-
-
-async def setup_post(request: Request) -> Response:
-    user_id = _read_session(request)
-    if not user_id:
-        return JSONResponse({"error": "not_authenticated"}, status_code=401)
     form = await request.form()
     token = (form.get("token") or "").strip()
-    label = form.get("label") or None
     cont = form.get("continue") or "/"
     if not token:
-        return HTMLResponse(_setup_page(error="Token is required", redirect_to=cont), status_code=400)
-    await storage.set_bf_token(user_id, token, label)
-    return RedirectResponse(cont, status_code=302)
+        return HTMLResponse(
+            _apikey_page(cont, error="API key is required"), status_code=400
+        )
+
+    api_base = get_settings().api_base.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{api_base}/v1/reports",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+    except httpx.HTTPError:
+        return HTMLResponse(
+            _apikey_page(cont, error="Could not reach Boniforce. Try again."),
+            status_code=502,
+        )
+    if resp.status_code in (401, 403):
+        return HTMLResponse(
+            _apikey_page(cont, error="Boniforce rejected this API key. Check it and retry."),
+            status_code=401,
+        )
+    if resp.status_code >= 500:
+        return HTMLResponse(
+            _apikey_page(cont, error=f"Boniforce returned {resp.status_code}. Try again later."),
+            status_code=502,
+        )
+    if resp.status_code != 200:
+        return HTMLResponse(
+            _apikey_page(cont, error=f"Unexpected validation response ({resp.status_code})."),
+            status_code=400,
+        )
+
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    user = await storage.upsert_token_user(token_hash, token)
+    redirect = RedirectResponse(cont, status_code=302)
+    _set_session(redirect, user.id)
+    return redirect
 
 
 # ---- /oauth/token ----
@@ -463,6 +454,4 @@ def routes() -> list[Route]:
         Route("/oauth/authorize", authorize, methods=["GET"]),
         Route("/oauth/login", login, methods=["POST"]),
         Route("/oauth/token", token, methods=["POST"]),
-        Route("/setup", setup_get, methods=["GET"]),
-        Route("/setup", setup_post, methods=["POST"]),
     ]

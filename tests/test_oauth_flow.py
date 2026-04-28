@@ -34,14 +34,23 @@ def app():
     return Starlette(routes=auth_mod.routes(), lifespan=_lifespan)
 
 
-@pytest.fixture
-async def seeded_user(app):
-    from boniforce_mcp import storage
+VALID_TOKEN = "bf-secret-token"
 
-    await storage.init_db()
-    user = await storage.create_user("alice@example.com", "password123")
-    await storage.set_bf_token(user.id, "bf-secret-token", "test")
-    return user
+
+@pytest.fixture(autouse=True)
+def _mock_bf_validation(respx_mock):
+    """Stub api.boniforce.de/v1/reports — 200 for VALID_TOKEN, 401 otherwise."""
+    import httpx
+    import respx as _respx
+
+    def _handler(request):
+        auth = request.headers.get("authorization", "")
+        if auth == f"Bearer {VALID_TOKEN}":
+            return httpx.Response(200, json=[])
+        return httpx.Response(401, json={"detail": "invalid"})
+
+    respx_mock.get("https://api.boniforce.de/v1/reports").mock(side_effect=_handler)
+    yield
 
 
 def _register_client(client: TestClient) -> str:
@@ -87,8 +96,19 @@ def test_dcr_returns_client_id(app):
     assert cid
 
 
+def test_invalid_bf_token_rejected(app):
+    with TestClient(app) as c:
+        r = c.post(
+            "/oauth/login",
+            data={"token": "bogus", "continue": "/"},
+            follow_redirects=False,
+        )
+    assert r.status_code == 401
+    assert "rejected" in r.text.lower()
+
+
 @pytest.mark.asyncio
-async def test_full_pkce_flow(app, seeded_user):
+async def test_full_pkce_flow(app):
     from boniforce_mcp.auth import public_key_pem
 
     verifier, challenge = _pkce_pair()
@@ -107,22 +127,18 @@ async def test_full_pkce_flow(app, seeded_user):
             "state": "xyz",
         }
 
-        # Anonymous → login form
+        # Anonymous → API-key form
         r = c.get(f"/oauth/authorize?{urlencode(params)}", follow_redirects=False)
         assert r.status_code == 200
-        assert "Sign in" in r.text
+        assert "Boniforce API key" in r.text
 
-        # Submit login → redirected back to /authorize with cookie set, then to redirect_uri
+        # Submit token → 302 back to /authorize with session cookie set
         r2 = c.post(
             "/oauth/login",
-            data={
-                "email": "alice@example.com",
-                "password": "password123",
-                "continue": f"/oauth/authorize?{urlencode(params)}",
-            },
+            data={"token": VALID_TOKEN, "continue": f"/oauth/authorize?{urlencode(params)}"},
             follow_redirects=False,
         )
-        assert r2.status_code == 302
+        assert r2.status_code == 302, r2.text
         cont_url = r2.headers["location"]
 
         r3 = c.get(cont_url, follow_redirects=False)
@@ -149,7 +165,6 @@ async def test_full_pkce_flow(app, seeded_user):
         assert "access_token" in body
         assert "refresh_token" in body
 
-        # Validate the access token signature & claims via JWKS public key
         decoded = jwt.decode(
             body["access_token"],
             public_key_pem(),
@@ -157,8 +172,8 @@ async def test_full_pkce_flow(app, seeded_user):
             audience="http://testserver/mcp",
             issuer="http://testserver",
         )
-        assert decoded["sub"] == seeded_user.id
         assert decoded["client_id"] == cid
+        assert decoded["sub"]  # synthetic user_id
 
         # Refresh
         r5 = c.post(
@@ -174,7 +189,7 @@ async def test_full_pkce_flow(app, seeded_user):
 
 
 @pytest.mark.asyncio
-async def test_pkce_failure_rejected(app, seeded_user):
+async def test_pkce_failure_rejected(app):
     _, challenge = _pkce_pair()
     bad_verifier = "wrong-verifier"
     redirect_uri = "https://example.com/cb"
@@ -191,11 +206,7 @@ async def test_pkce_failure_rejected(app, seeded_user):
         }
         c.post(
             "/oauth/login",
-            data={
-                "email": "alice@example.com",
-                "password": "password123",
-                "continue": f"/oauth/authorize?{urlencode(params)}",
-            },
+            data={"token": VALID_TOKEN, "continue": f"/oauth/authorize?{urlencode(params)}"},
             follow_redirects=False,
         )
         r = c.get(f"/oauth/authorize?{urlencode(params)}", follow_redirects=False)

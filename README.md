@@ -22,18 +22,17 @@ https://mcp.boniforce.de/mcp
 
 1. Open [claude.ai](https://claude.ai) → **Settings → Connectors → Add custom connector**.
 2. Paste the URL above.
-3. A browser tab opens — sign in with your Boniforce MCP credentials.
-4. On first connection only: paste your Boniforce API token when prompted.
-5. The Boniforce tools appear in your chat.
+3. A browser tab opens — paste your **Boniforce API key**.
+4. The Boniforce tools appear in your chat.
 
 ### Add to ChatGPT
 
 Settings → **Connectors → Add** → paste the same URL. The OAuth flow is identical.
 
-### Don't have an account yet?
+### Don't have an API key yet?
 
-Contact Boniforce to be provisioned. End users get an email + password for the
-MCP login plus a personal Boniforce API token.
+Generate one in your Boniforce dashboard. The API key is the only credential
+the connector needs — no separate MCP password to manage.
 
 ---
 
@@ -94,14 +93,8 @@ chmod 600 ../.env
 docker compose up -d --build
 ```
 
-Provision a user:
-
-```bash
-docker exec -it boniforce-mcp boniforce-mcp adduser you@example.com
-docker exec -it boniforce-mcp boniforce-mcp setkey  you@example.com
-```
-
-The connector URL is now `https://your.domain.tld/mcp`.
+The connector URL is now `https://your.domain.tld/mcp`. Users self-provision
+by pasting their Boniforce API key on first connection — no admin step needed.
 
 ### Behind an existing Traefik
 
@@ -148,10 +141,11 @@ npx @modelcontextprotocol/inspector http://localhost:8000/mcp
 boniforce-mcp genkey         # Fernet key for BF_ENCRYPTION_KEY
 boniforce-mcp gensigning     # RSA private key for BF_OAUTH_SIGNING_KEY
 boniforce-mcp initdb         # create SQLite schema (idempotent)
-boniforce-mcp adduser EMAIL  # create user (prompts for password)
-boniforce-mcp setkey  EMAIL  # store user's Boniforce token (prompts)
-boniforce-mcp listusers
+boniforce-mcp listusers      # list users (synthetic emails for token-only flow)
 ```
+
+In the standard flow users are auto-provisioned from their Boniforce API key
+on first connection — no admin commands needed.
 
 ## Endpoints
 
@@ -162,9 +156,9 @@ boniforce-mcp listusers
 | `/.well-known/oauth-protected-resource`        | Protected resource metadata (RFC 9728) |
 | `/oauth/register`                              | Dynamic Client Registration (RFC 7591) |
 | `/oauth/authorize`                             | OAuth authorization (PKCE)             |
+| `/oauth/login`                                 | API-key validation form                |
 | `/oauth/token`                                 | Token endpoint                         |
 | `/jwks.json`                                   | JSON Web Key Set                       |
-| `/setup`                                       | Boniforce-token link form              |
 
 ## Testing
 
@@ -178,12 +172,14 @@ PKCE flow including DCR + refresh, PKCE failure rejection, and JWKS shape.
 
 ## Security
 
-* Per-user Boniforce tokens stored Fernet-encrypted in SQLite; key in `.env`
-  (chmod 600, owned by the service user).
+* The Boniforce API key is the only user credential. It is validated against
+  `api.boniforce.de` on every login form submission and stored Fernet-encrypted
+  in SQLite (encryption key in `.env`, chmod 600, owned by the service user).
+* The user identifier is `sha256(token)` — same key on a different device maps
+  to the same MCP user.
 * OAuth access tokens are short-lived (1 h) RS256 JWTs bound to the canonical
   MCP resource URL. Refresh tokens are opaque, single-use, hashed in DB.
 * PKCE mandatory (`S256` only); `plain` rejected per OAuth 2.1.
-* Passwords bcrypt-hashed.
 * Reverse proxy (Caddy or Traefik) handles TLS; the application listens only
   on the internal port.
 

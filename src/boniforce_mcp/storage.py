@@ -138,6 +138,31 @@ async def verify_user(email: str, password: str) -> User | None:
     return User(id=row["id"], email=row["email"])
 
 
+async def upsert_token_user(token_hash_hex: str, token_plain: str) -> User:
+    """Get-or-create a user keyed by SHA-256(BF token). The same token always
+    maps to the same user_id so re-connecting from a new MCP client preserves
+    state. Stores the encrypted token under that user."""
+    synthetic_email = f"bf-{token_hash_hex[:16]}@auto.boniforce"
+    async with _connect() as db:
+        _row(db)
+        async with db.execute(
+            "SELECT id,email FROM users WHERE email=?", (synthetic_email,)
+        ) as cur:
+            row = await cur.fetchone()
+        if row:
+            user = User(id=row["id"], email=row["email"])
+        else:
+            user_id = str(uuid.uuid4())
+            await db.execute(
+                "INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)",
+                (user_id, synthetic_email, token_hash_hex, _now()),
+            )
+            await db.commit()
+            user = User(id=user_id, email=synthetic_email)
+    await set_bf_token(user.id, token_plain, "auto")
+    return user
+
+
 async def list_users() -> list[User]:
     async with _connect() as db:
         _row(db)
