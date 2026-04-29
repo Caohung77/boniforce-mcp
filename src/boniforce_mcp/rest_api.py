@@ -367,14 +367,14 @@ def _openapi_spec() -> dict[str, Any]:
                 },
                 "post": {
                     "operationId": "createReport",
-                    "summary": (
-                        "Kick off Boniscore generation. Returns job_id + report_id. "
-                        "Pass ?wait=40 (max 40s) to have the server long-poll and inline "
-                        "the finished report when ready. Reports take 30-120s, so the "
-                        "response may come back with done=false; in that case immediately "
-                        "call getJobStatus with ?wait=40 and repeat (max 3 times total) "
-                        "until done=true. Never tell the user 'still processing' until "
-                        "you have made 3 calls."
+                    "summary": "Start Boniscore report. Pass ?wait=40 to long-poll up to 40s.",
+                    "description": (
+                        "Kicks off report generation and (with ?wait=40) long-polls server-side "
+                        "for up to 40 seconds, inlining the finished report when ready. "
+                        "Reports take 30-120s, so the response may come back with done=false; "
+                        "in that case immediately call getJobStatus with ?wait=40 and repeat "
+                        "(max 3 calls total) until done=true. Never tell the user 'still "
+                        "processing' before you have made 3 calls."
                     ),
                     "parameters": [
                         {
@@ -429,11 +429,12 @@ def _openapi_spec() -> dict[str, Any]:
             "/api/v1/jobs/{job_id}/status": {
                 "get": {
                     "operationId": "getJobStatus",
-                    "summary": (
-                        "Poll a report-generation job (queued -> running -> completed). "
-                        "Pass ?wait=40 to long-poll server-side; returns within ~40s with "
-                        "either done=true (terminal) or done=false + next_action (still "
-                        "running — call this endpoint again with ?wait=40). Loop until "
+                    "summary": "Poll report job. Pass ?wait=40 to long-poll up to 40s.",
+                    "description": (
+                        "Returns the latest status of a report job (queued -> running -> "
+                        "completed/failed). With ?wait=40 the server long-polls for up to 40s. "
+                        "The response includes done=true (terminal) or done=false + next_action "
+                        "(still running — call this endpoint again with ?wait=40). Loop until "
                         "done=true; max 3 calls (~120s) before treating the job as stuck."
                     ),
                     "parameters": [
