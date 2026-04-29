@@ -25,6 +25,7 @@ from starlette.types import ASGIApp
 from . import auth, rest_api, storage
 from .boniforce_client import BoniforceClient, BoniforceError
 from .config import get_settings
+from .rest_api import annotate_job_outcome
 
 
 def _build_verifier() -> JWTVerifier:
@@ -61,21 +62,29 @@ def _make_mcp() -> FastMCP:
             "Tools for the Boniforce credit/financial-data API for German companies.\n\n"
             "STANDARD WORKFLOW (use this in 99% of cases):\n"
             "  1. search_companies(query) -> get register_type, register_number, register_court.\n"
-            "  2. create_report(...)  with wait_seconds=40 (default) -> the response usually\n"
-            "     already contains `report` with the finished Boniscore, credit_limit and\n"
-            "     assessment. Read it directly and reply to the user.\n"
-            "  3. If `report` is missing because the job is still running, call\n"
-            "     get_job_status(job_id, wait_seconds=40) ONCE — this long-polls server-side.\n"
-            "  4. When status='completed', call get_report(report_id) to fetch the score.\n"
+            "  2. create_report(...) with wait_seconds=40 (default) -> response often already\n"
+            "     contains `report` with the finished Boniscore. Check the `done` field.\n"
+            "  3. If done=false, call get_job_status(job_id, wait_seconds=40). Repeat until\n"
+            "     done=true. See LOOP RULE below.\n"
+            "  4. When status='completed', call get_report(report_id) (only needed if `report`\n"
+            "     wasn't already inlined by create_report).\n"
             "  5. Optional drill-down: get_report_financial_data(report_id) and\n"
             "     get_report_financial_analysis(report_id).\n\n"
-            "IMPORTANT — long-running jobs:\n"
-            "  - Boniforce reports take 30-120 s. Always rely on server-side waiting via\n"
-            "    wait_seconds; do NOT return control to the user with status='processing'.\n"
-            "  - If after one wait_seconds=40 call the job is still not finished, tell the\n"
-            "    user 'Bericht läuft noch, Status: <status>. Frage in ~30s erneut nach.' so\n"
-            "    they know progress is real, not a stuck chat.\n"
-            "  - Never ask the user to retry without giving the latest status.\n\n"
+            "LOOP RULE — long-running jobs (CRITICAL for ChatGPT Actions):\n"
+            "  Boniforce reports take 30-120s. Each tool call long-polls up to 40s server-side\n"
+            "  (the upper bound for ChatGPT's per-call HTTP timeout). A 120s report therefore\n"
+            "  needs UP TO 3 sequential tool calls within the SAME user turn:\n"
+            "    call 1 = create_report(..., wait_seconds=40)         (~0-40s elapsed)\n"
+            "    call 2 = get_job_status(job_id, wait_seconds=40)     (~40-80s elapsed)\n"
+            "    call 3 = get_job_status(job_id, wait_seconds=40)     (~80-120s elapsed)\n"
+            "  After EACH call, inspect `done` in the response:\n"
+            "    - done=true  -> read the report (or call get_report) and reply to user.\n"
+            "    - done=false -> call get_job_status again immediately. DO NOT stop, DO NOT\n"
+            "                    tell the user 'still processing'. The server response also\n"
+            "                    includes a `next_action` string — follow it.\n"
+            "  Only AFTER 3 polls have all returned done=false should you tell the user\n"
+            "  'Der Bericht dauert ungewöhnlich lange (>2min). Status: <status>.' and stop.\n"
+            "  Never ask the user to retry manually; never return early with done=false.\n\n"
             "list_reports() shows previously generated reports — check it first if the user\n"
             "asks about a company that may already have a fresh report.\n\n"
             "404 from get_report_financial_* means no Bundesanzeiger annual filing exists\n"
@@ -136,11 +145,14 @@ def _make_mcp() -> FastMCP:
         wait_seconds: int = 40,
     ) -> Any:
         """Step 2 of Boniscore workflow: kick off report generation AND wait
-        server-side for it to finish (default 40s, max 40s). Pass wait_seconds=0
-        to return immediately with status='queued' and poll get_job_status
-        manually instead. With the default, the response inlines `final_status`
-        and (if completed) the full `report` so the model usually gets a
-        one-shot answer without further polling."""
+        server-side for it to finish (default 40s, max 40s). With the default,
+        the response inlines `final_status` and (if completed) the full
+        `report`. Reports take 30-120s, so the response also includes a
+        `done` boolean: if `done` is False, immediately call
+        get_job_status(job_id, wait_seconds=40) and repeat until done=True
+        (typically ≤3 calls total). Never tell the user the job is "still
+        processing" before you have called get_job_status at least 2 more
+        times after this one."""
         _, token = await _user_token()
         client = _bf_client_from_state()
         try:
@@ -155,16 +167,19 @@ def _make_mcp() -> FastMCP:
         except BoniforceError as e:
             raise _wrap(e)
         ws = max(0, min(40, wait_seconds))
+        status_value: str | None = None
         if ws and data.get("job_id"):
             try:
                 status = await client.wait_for_job(token, data["job_id"], max_wait_s=ws)
                 data["final_status"] = status
-                if (status or {}).get("status", "").lower() in ("completed", "finished") and data.get(
+                status_value = (status or {}).get("status")
+                if (status_value or "").lower() in ("completed", "finished") and data.get(
                     "report_id"
                 ):
                     data["report"] = await client.get_report(token, data["report_id"])
             except BoniforceError as e:
                 raise _wrap(e)
+        annotate_job_outcome(data, data.get("job_id"), status_value)
         return data
 
     @mcp.tool
@@ -181,21 +196,26 @@ def _make_mcp() -> FastMCP:
             raise _wrap(e)
 
     @mcp.tool
-    async def get_job_status(job_id: str, wait_seconds: int = 0) -> Any:
+    async def get_job_status(job_id: str, wait_seconds: int = 40) -> Any:
         """Step 3 of Boniscore workflow: poll a report-generation job. status
         moves queued -> running -> completed (or failed). Typical time 30-120s.
-        Set wait_seconds (0-40) to long-poll server-side instead of returning
-        immediately, so the model can wait without burning extra tool calls.
+        Default wait_seconds=40 long-polls server-side. The response includes
+        a `done` boolean: if `done` is False, call this tool AGAIN with the
+        same job_id and wait_seconds=40. Repeat until done=True (max ~3 calls,
+        ~120s total). Only treat the job as stuck after 3 unsuccessful polls.
         Once status='completed', call get_report(report_id)."""
         _, token = await _user_token()
         ws = max(0, min(40, wait_seconds))
         client = _bf_client_from_state()
         try:
             if ws:
-                return await client.wait_for_job(token, job_id, max_wait_s=ws)
-            return await client.get_job_status(token, job_id)
+                data = await client.wait_for_job(token, job_id, max_wait_s=ws)
+            else:
+                data = await client.get_job_status(token, job_id)
         except BoniforceError as e:
             raise _wrap(e)
+        annotate_job_outcome(data, job_id, (data or {}).get("status") if isinstance(data, dict) else None)
+        return data
 
     @mcp.tool
     async def get_report_financial_data(report_id: str) -> Any:
