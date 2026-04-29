@@ -369,12 +369,11 @@ def _openapi_spec() -> dict[str, Any]:
                     "operationId": "createReport",
                     "summary": "Start Boniscore report. Pass ?wait=40 to long-poll up to 40s.",
                     "description": (
-                        "Kicks off report generation and (with ?wait=40) long-polls server-side "
-                        "for up to 40 seconds, inlining the finished report when ready. "
-                        "Reports take 30-120s, so the response may come back with done=false; "
-                        "in that case immediately call getJobStatus with ?wait=40 and repeat "
-                        "(max 3 calls total) until done=true. Never tell the user 'still "
-                        "processing' before you have made 3 calls."
+                        "Kicks off report generation. With ?wait=40 the server long-polls up "
+                        "to 40s and inlines the finished report. Reports take 30-120s — if "
+                        "done=false, immediately call getJobStatus with ?wait=40 and repeat "
+                        "(max 3 calls) until done=true. Never reply 'still processing' before "
+                        "3 calls."
                     ),
                     "parameters": [
                         {
@@ -431,11 +430,11 @@ def _openapi_spec() -> dict[str, Any]:
                     "operationId": "getJobStatus",
                     "summary": "Poll report job. Pass ?wait=40 to long-poll up to 40s.",
                     "description": (
-                        "Returns the latest status of a report job (queued -> running -> "
-                        "completed/failed). With ?wait=40 the server long-polls for up to 40s. "
-                        "The response includes done=true (terminal) or done=false + next_action "
-                        "(still running — call this endpoint again with ?wait=40). Loop until "
-                        "done=true; max 3 calls (~120s) before treating the job as stuck."
+                        "Returns latest job status (queued -> running -> completed/failed). "
+                        "With ?wait=40 the server long-polls up to 40s. Response has done=true "
+                        "(terminal) or done=false + next_action (still running — call again "
+                        "with ?wait=40). Loop until done=true; max 3 calls before treating "
+                        "the job as stuck."
                     ),
                     "parameters": [
                         {
