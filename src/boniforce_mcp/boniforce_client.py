@@ -84,7 +84,7 @@ class BoniforceClient:
         return await self._request("GET", f"/v1/jobs/{job_id}/status", token)
 
     async def wait_for_job(
-        self, token: str, job_id: str, max_wait_s: float = 40.0, poll_every_s: float = 3.0
+        self, token: str, job_id: str, max_wait_s: float = 40.0, poll_every_s: float = 2.0
     ) -> Any:
         """Poll get_job_status until terminal state or max_wait_s exceeded."""
         import asyncio

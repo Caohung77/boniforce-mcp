@@ -66,6 +66,37 @@ def _client_holder() -> Any:
     return h["client"]
 
 
+# ---------------- job-status helpers (shared with MCP server.py) ----------------
+
+TERMINAL_JOB_STATUSES = frozenset({"completed", "finished", "failed", "error"})
+
+
+def annotate_job_outcome(
+    payload: Any, job_id: str | None, status_value: str | None
+) -> Any:
+    """Mutate ``payload`` in place to add ``done`` and (when not done)
+    ``next_action`` fields so the model knows whether to keep polling.
+
+    The model (ChatGPT Action / Claude tool call) only sees one HTTP response
+    per call. ChatGPT's per-call timeout is ~45s and our long-poll caps at 40s,
+    so reports >40s need 2-3 sequential calls. ``next_action`` makes that
+    explicit instead of relying on instruction-following alone.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    status_str = (status_value or "").lower().strip()
+    done = status_str in TERMINAL_JOB_STATUSES
+    payload["done"] = done
+    if not done:
+        jid = job_id or payload.get("job_id") or "<job_id>"
+        payload["next_action"] = (
+            f"Job not finished yet (status={status_str or 'unknown'}). "
+            f"Call get_job_status again with job_id={jid} and wait_seconds=40. "
+            "Keep calling until done=true (typically 1-3 calls, max ~120s total)."
+        )
+    return payload
+
+
 # ---------------- handlers ----------------
 
 async def search_companies(request: Request) -> Response:
@@ -123,6 +154,7 @@ async def create_report(request: Request) -> Response:
     # get_job_status server-side and additionally fetch the finished report
     # so the caller gets a one-shot answer instead of needing to poll.
     wait_param = request.query_params.get("wait")
+    status_value: str | None = None
     if wait_param and data.get("job_id"):
         try:
             wait_s = max(0.0, min(40.0, float(wait_param)))
@@ -132,11 +164,13 @@ async def create_report(request: Request) -> Response:
             client = _client_holder()
             status = await client.wait_for_job(token, data["job_id"], max_wait_s=wait_s)
             data["final_status"] = status
-            if (status or {}).get("status", "").lower() in ("completed", "finished") and data.get("report_id"):
+            status_value = (status or {}).get("status")
+            if (status_value or "").lower() in ("completed", "finished") and data.get("report_id"):
                 try:
                     data["report"] = await client.get_report(token, data["report_id"])
                 except Exception:
                     pass
+    annotate_job_outcome(data, data.get("job_id"), status_value)
     return JSONResponse(data)
 
 
@@ -168,6 +202,7 @@ async def get_job_status(request: Request) -> Response:
             data = await _client_holder().get_job_status(token, job_id)
     except Exception as exc:
         return _err(502, f"Boniforce upstream: {exc}")
+    annotate_job_outcome(data, job_id, (data or {}).get("status") if isinstance(data, dict) else None)
     return JSONResponse(data)
 
 
@@ -268,6 +303,23 @@ def _openapi_spec() -> dict[str, Any]:
                             "type": "string",
                             "description": "queued | running | completed | failed",
                         },
+                        "done": {
+                            "type": "boolean",
+                            "description": (
+                                "True if the job reached a terminal state "
+                                "(completed/finished/failed/error). False means "
+                                "the caller MUST call this endpoint again with "
+                                "?wait=40 to keep waiting."
+                            ),
+                        },
+                        "next_action": {
+                            "type": "string",
+                            "description": (
+                                "Present only when done=false. Plain-English "
+                                "instruction for the model: keep polling until "
+                                "done=true (typically 1-3 calls total, max ~120s)."
+                            ),
+                        },
                         "error_message": {"type": "string", "nullable": True},
                     },
                 },
@@ -317,9 +369,12 @@ def _openapi_spec() -> dict[str, Any]:
                     "operationId": "createReport",
                     "summary": (
                         "Kick off Boniscore generation. Returns job_id + report_id. "
-                        "Pass ?wait=40 (seconds, max 40) to have the server poll until the "
-                        "report finishes and inline the finished report in the response — "
-                        "saves the model from polling and avoids ChatGPT Action timeouts."
+                        "Pass ?wait=40 (max 40s) to have the server long-poll and inline "
+                        "the finished report when ready. Reports take 30-120s, so the "
+                        "response may come back with done=false; in that case immediately "
+                        "call getJobStatus with ?wait=40 and repeat (max 3 times total) "
+                        "until done=true. Never tell the user 'still processing' until "
+                        "you have made 3 calls."
                     ),
                     "parameters": [
                         {
@@ -376,8 +431,10 @@ def _openapi_spec() -> dict[str, Any]:
                     "operationId": "getJobStatus",
                     "summary": (
                         "Poll a report-generation job (queued -> running -> completed). "
-                        "Pass ?wait=40 to long-poll server-side instead of repeatedly calling. "
-                        "Always returns within ~40s and includes the latest status."
+                        "Pass ?wait=40 to long-poll server-side; returns within ~40s with "
+                        "either done=true (terminal) or done=false + next_action (still "
+                        "running — call this endpoint again with ?wait=40). Loop until "
+                        "done=true; max 3 calls (~120s) before treating the job as stuck."
                     ),
                     "parameters": [
                         {
