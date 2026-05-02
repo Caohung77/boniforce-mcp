@@ -111,6 +111,16 @@ you can wire it into a Custom GPT's *Aktionen* panel.
 
 3. Save → publish (Nur ich / Mit Link / Öffentlich).
 
+The same OpenAPI schema also exposes **branch-level sector data** for 10
+German industries (automotive, construction, healthcare, fintech, …) —
+current health scores, 12-month score history, AI-summarised monthly news
+reports, and Destatis insolvency trends — powered by
+[Sectorbench](https://sectorbench.theaiwhisperer.cloud). The Custom GPT
+authenticates with the same OAuth flow as the credit-data endpoints; the
+upstream Sectorbench call uses an operator-issued bearer token configured
+on the server (`BF_SECTORBENCH_TOKEN`). Try: *"Show me the construction
+sector's health score and the latest monthly outlook."*
+
 End-user flow inside the public GPT:
 
 > User opens the GPT → asks a question → ChatGPT redirects to our
@@ -239,6 +249,9 @@ BF_OAUTH_SIGNING_KEY="$(docker run --rm python:3.11-slim sh -c "pip install -q c
 BF_API_BASE=https://api.boniforce.de
 BF_HOST=0.0.0.0
 BF_PORT=8000
+# Optional — enables the Sectorbench branch-data endpoints under /api/v1/branches/*
+# Leave empty to disable (those endpoints will return 503).
+BF_SECTORBENCH_TOKEN=
 EOF
 chmod 600 ../.env
 

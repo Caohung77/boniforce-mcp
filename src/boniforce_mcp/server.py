@@ -26,6 +26,7 @@ from . import auth, rest_api, storage
 from .boniforce_client import BoniforceClient, BoniforceError
 from .config import get_settings
 from .rest_api import annotate_job_outcome
+from .sectorbench_client import SectorbenchClient
 
 
 def _build_verifier() -> JWTVerifier:
@@ -49,10 +50,12 @@ _client_holder: dict[str, Any] = {}
 async def lifespan(app: Starlette):
     await storage.init_db()
     _client_holder["client"] = BoniforceClient()
+    _client_holder["sectorbench"] = SectorbenchClient()
     try:
         yield
     finally:
         await _client_holder["client"].aclose()
+        await _client_holder["sectorbench"].aclose()
 
 
 def _make_mcp() -> FastMCP:
@@ -275,12 +278,14 @@ def build_app() -> Starlette:
 async def _combined_lifespan(mcp_app: Starlette):
     await storage.init_db()
     _client_holder["client"] = BoniforceClient()
+    _client_holder["sectorbench"] = SectorbenchClient()
     inner_lifespan = mcp_app.router.lifespan_context
     try:
         async with inner_lifespan(mcp_app):
             yield
     finally:
         await _client_holder["client"].aclose()
+        await _client_holder["sectorbench"].aclose()
 
 
 # uvicorn entry point: `uvicorn boniforce_mcp.server:app`

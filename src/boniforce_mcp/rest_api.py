@@ -20,6 +20,23 @@ from starlette.routing import Route
 
 from . import auth, storage
 from .config import get_settings
+from .sectorbench_client import SectorbenchError
+
+
+SECTORBENCH_BRANCH_KEYS: frozenset[str] = frozenset(
+    {
+        "automotive",
+        "healthcare",
+        "construction",
+        "renewable_energy",
+        "logistics",
+        "fintech",
+        "it_services",
+        "retail",
+        "hospitality",
+        "manufacturing",
+    }
+)
 
 
 # ---------------- bearer JWT extraction ----------------
@@ -64,6 +81,80 @@ def _client_holder() -> Any:
     from .server import _client_holder as h
 
     return h["client"]
+
+
+def _sectorbench_client() -> Any:
+    from .server import _client_holder as h
+
+    return h["sectorbench"]
+
+
+async def _authenticate_only(request: Request) -> str:
+    """Validate the user JWT but don't require a linked Boniforce key.
+
+    Used by the Sectorbench proxy endpoints — they call upstream with the
+    server's shared token and only need to know the request comes from an
+    authenticated MCP user.
+    """
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("bearer "):
+        raise HTTPError(401, "Missing or malformed Authorization header.")
+    token = header[7:].strip()
+    settings = get_settings()
+    try:
+        claims = jwt.decode(
+            token,
+            auth.public_key_pem(),
+            algorithms=["RS256"],
+            audience=settings.audience,
+            issuer=settings.issuer,
+        )
+    except jwt.PyJWTError as exc:
+        raise HTTPError(401, f"Invalid token: {exc}") from exc
+    user_id = claims.get("sub")
+    if not user_id:
+        raise HTTPError(401, "Token missing subject claim.")
+    return user_id
+
+
+def _validate_branch_key(branch_key: str) -> None:
+    if branch_key not in SECTORBENCH_BRANCH_KEYS:
+        raise HTTPError(
+            404,
+            f"Unknown branch key '{branch_key}'. "
+            f"Valid: {', '.join(sorted(SECTORBENCH_BRANCH_KEYS))}.",
+        )
+
+
+def _wrap_sectorbench(exc: SectorbenchError) -> JSONResponse:
+    """Map upstream Sectorbench errors to the proxy's HTTP response.
+
+    - 401/403 from upstream means the server's shared token is bad — surface
+      as 502 (server config), not user-facing 401, since the user JWT is fine.
+    - 404 / 429 / 503 forward as-is (semantics carry over to the GPT).
+    - Anything else → 502.
+    """
+    if exc.status in (404, 429, 503):
+        return JSONResponse(
+            {"error": exc.body if isinstance(exc.body, dict) else {"message": exc.body}},
+            status_code=exc.status,
+        )
+    if exc.status in (401, 403):
+        return _err(502, "Sectorbench upstream rejected the operator token.")
+    return _err(502, f"Sectorbench upstream {exc.status}: {exc.body}")
+
+
+def _parse_months(request: Request, *, default: int = 12, maximum: int = 36) -> int:
+    raw = request.query_params.get("months")
+    if raw is None:
+        return default
+    try:
+        n = int(raw)
+    except ValueError:
+        raise HTTPError(400, "months must be an integer.") from None
+    if n < 1 or n > maximum:
+        raise HTTPError(400, f"months must be between 1 and {maximum}.")
+    return n
 
 
 # ---------------- job-status helpers (shared with MCP server.py) ----------------
@@ -232,6 +323,153 @@ async def get_report_financial_analysis(request: Request) -> Response:
     return JSONResponse(data)
 
 
+# ---------------- Sectorbench proxy handlers ----------------
+
+
+async def list_branch_scores(request: Request) -> Response:
+    try:
+        await _authenticate_only(request)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _sectorbench_client().get_all_scores()
+    except SectorbenchError as exc:
+        return _wrap_sectorbench(exc)
+    except Exception as exc:
+        return _err(502, f"Sectorbench upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def get_branch_ranking(request: Request) -> Response:
+    try:
+        await _authenticate_only(request)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _sectorbench_client().get_ranking()
+    except SectorbenchError as exc:
+        return _wrap_sectorbench(exc)
+    except Exception as exc:
+        return _err(502, f"Sectorbench upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def get_branch(request: Request) -> Response:
+    try:
+        await _authenticate_only(request)
+        branch_key = request.path_params["branch_key"]
+        _validate_branch_key(branch_key)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _sectorbench_client().get_branch(branch_key)
+    except SectorbenchError as exc:
+        return _wrap_sectorbench(exc)
+    except Exception as exc:
+        return _err(502, f"Sectorbench upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def get_branch_history(request: Request) -> Response:
+    try:
+        await _authenticate_only(request)
+        branch_key = request.path_params["branch_key"]
+        _validate_branch_key(branch_key)
+        months = _parse_months(request, default=12, maximum=24)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _sectorbench_client().get_branch_history(branch_key, months)
+    except SectorbenchError as exc:
+        return _wrap_sectorbench(exc)
+    except Exception as exc:
+        return _err(502, f"Sectorbench upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def get_branch_news(request: Request) -> Response:
+    try:
+        await _authenticate_only(request)
+        branch_key = request.path_params["branch_key"]
+        _validate_branch_key(branch_key)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _sectorbench_client().get_branch_news(branch_key)
+    except SectorbenchError as exc:
+        return _wrap_sectorbench(exc)
+    except Exception as exc:
+        return _err(502, f"Sectorbench upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def get_branch_insolvency_history(request: Request) -> Response:
+    try:
+        await _authenticate_only(request)
+        branch_key = request.path_params["branch_key"]
+        _validate_branch_key(branch_key)
+        months = _parse_months(request, default=12, maximum=36)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _sectorbench_client().get_branch_insolvency_history(
+            branch_key, months
+        )
+    except SectorbenchError as exc:
+        return _wrap_sectorbench(exc)
+    except Exception as exc:
+        return _err(502, f"Sectorbench upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def get_branch_indicator_history(request: Request) -> Response:
+    try:
+        await _authenticate_only(request)
+        branch_key = request.path_params["branch_key"]
+        _validate_branch_key(branch_key)
+        indicator_key = request.path_params["indicator_key"]
+        months = _parse_months(request, default=12, maximum=24)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _sectorbench_client().get_indicator_history(
+            branch_key, indicator_key, months
+        )
+    except SectorbenchError as exc:
+        return _wrap_sectorbench(exc)
+    except Exception as exc:
+        return _err(502, f"Sectorbench upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def list_indicators(request: Request) -> Response:
+    try:
+        await _authenticate_only(request)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _sectorbench_client().get_indicator_catalog()
+    except SectorbenchError as exc:
+        return _wrap_sectorbench(exc)
+    except Exception as exc:
+        return _err(502, f"Sectorbench upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def get_sectorbench_meta(request: Request) -> Response:
+    try:
+        await _authenticate_only(request)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _sectorbench_client().meta()
+    except SectorbenchError as exc:
+        return _wrap_sectorbench(exc)
+    except Exception as exc:
+        return _err(502, f"Sectorbench upstream: {exc}")
+    return JSONResponse(data)
+
+
 # ---------------- OpenAPI spec ----------------
 
 def _openapi_spec() -> dict[str, Any]:
@@ -326,6 +564,175 @@ def _openapi_spec() -> dict[str, Any]:
                 "Error": {
                     "type": "object",
                     "properties": {"error": {"type": "string"}},
+                },
+                "BranchKey": {
+                    "type": "string",
+                    "description": "WZ-2008-aligned key for one of the 10 covered German sectors.",
+                    "enum": [
+                        "automotive",
+                        "healthcare",
+                        "construction",
+                        "renewable_energy",
+                        "logistics",
+                        "fintech",
+                        "it_services",
+                        "retail",
+                        "hospitality",
+                        "manufacturing",
+                    ],
+                },
+                "BranchScore": {
+                    "type": "object",
+                    "properties": {
+                        "branch_key": {"$ref": "#/components/schemas/BranchKey"},
+                        "branch_name_de": {"type": "string"},
+                        "branch_name_en": {"type": "string"},
+                        "composite_score": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 100,
+                            "description": "Composite branch-health score 0-100; higher = healthier sector.",
+                        },
+                        "risk_level": {
+                            "type": "string",
+                            "description": "Free-form upstream label, e.g. low/medium/high or Excellent/Critical.",
+                        },
+                        "confidence": {"type": "string"},
+                        "dimensions": {
+                            "type": "object",
+                            "properties": {
+                                "financial_health": {"type": "number", "nullable": True},
+                                "market_dynamics": {"type": "number", "nullable": True},
+                                "regulatory_climate": {"type": "number", "nullable": True},
+                                "innovation_index": {"type": "number", "nullable": True},
+                                "labor_market": {"type": "number", "nullable": True},
+                                "external_risk": {"type": "number", "nullable": True},
+                            },
+                        },
+                        "rank": {"type": "integer", "minimum": 1, "maximum": 10},
+                        "percentile": {"type": "number"},
+                        "rank_delta": {"type": "integer", "nullable": True},
+                        "fetch_run_id": {"type": "integer"},
+                        "fetched_at": {"type": "string", "format": "date-time"},
+                        "weight_profile": {
+                            "type": "string",
+                            "enum": ["bank", "default", "equal"],
+                        },
+                    },
+                    "required": [
+                        "branch_key",
+                        "composite_score",
+                        "risk_level",
+                        "confidence",
+                        "dimensions",
+                        "rank",
+                        "fetched_at",
+                    ],
+                },
+                "BranchScoreHistoryPoint": {
+                    "type": "object",
+                    "properties": {
+                        "reference_period": {"type": "string", "format": "date"},
+                        "fetched_at": {"type": "string", "format": "date-time"},
+                        "composite_score": {"type": "number"},
+                        "risk_level": {"type": "string"},
+                        "dimensions": {
+                            "type": "object",
+                            "additionalProperties": {"type": "number"},
+                        },
+                    },
+                },
+                "IndicatorCatalogEntry": {
+                    "type": "object",
+                    "properties": {
+                        "indicator_key": {"type": "string"},
+                        "name_de": {"type": "string"},
+                        "name_en": {"type": "string"},
+                        "description_de": {"type": "string"},
+                        "description_en": {"type": "string"},
+                        "unit": {"type": "string"},
+                        "higher_is_better": {"type": "boolean"},
+                        "publication_lag_months": {"type": "integer", "nullable": True},
+                    },
+                },
+                "IndicatorHistoryPoint": {
+                    "type": "object",
+                    "properties": {
+                        "reference_period": {"type": "string", "format": "date"},
+                        "reference_period_inferred": {"type": "boolean"},
+                        "fetched_at": {"type": "string", "format": "date-time"},
+                        "value": {"type": "number", "nullable": True},
+                    },
+                },
+                "InsolvencyHistoryPoint": {
+                    "type": "object",
+                    "properties": {
+                        "reference_period": {"type": "string", "format": "date"},
+                        "opened_cases": {"type": "integer", "nullable": True},
+                        "dismissed_cases": {"type": "integer", "nullable": True},
+                        "total_cases": {"type": "integer", "nullable": True},
+                    },
+                },
+                "NewsReport": {
+                    "type": "object",
+                    "properties": {
+                        "branch_key": {"$ref": "#/components/schemas/BranchKey"},
+                        "window_start": {"type": "string", "format": "date"},
+                        "window_end": {"type": "string", "format": "date"},
+                        "executive_overview": {"type": "string"},
+                        "key_developments": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "title": {"type": "string"},
+                                    "summary": {"type": "string"},
+                                    "impact": {"type": "string"},
+                                    "citations": {
+                                        "type": "array",
+                                        "items": {"type": "integer"},
+                                    },
+                                },
+                            },
+                        },
+                        "impact_assessment": {"type": "string"},
+                        "risk_watchlist": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "item": {"type": "string"},
+                                    "severity": {"type": "string"},
+                                },
+                            },
+                        },
+                        "next_week_outlook": {"type": "string"},
+                        "citations": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "integer"},
+                                    "title": {"type": "string"},
+                                    "url": {"type": "string", "format": "uri"},
+                                    "source": {"type": "string"},
+                                },
+                            },
+                        },
+                        "citation_count": {"type": "integer"},
+                        "published_at": {"type": "string", "format": "date-time"},
+                        "model": {"type": "string"},
+                    },
+                },
+                "SectorbenchMeta": {
+                    "type": "object",
+                    "properties": {
+                        "api_version": {"type": "string"},
+                        "latest_fetch_run_id": {"type": "integer"},
+                        "latest_fetch_run_at": {"type": "string", "format": "date-time"},
+                        "weight_profile": {"type": "string"},
+                        "branch_count": {"type": "integer"},
+                    },
                 },
             },
         },
@@ -484,6 +891,199 @@ def _openapi_spec() -> dict[str, Any]:
                     "responses": {"200": {"description": "OK"}},
                 }
             },
+            "/api/v1/branches": {
+                "get": {
+                    "operationId": "listBranchScores",
+                    "summary": "Current branch-health scores for all 10 German sectors.",
+                    "description": (
+                        "Returns the latest composite score (0-100), risk level, "
+                        "dimensions, and ranking for every covered sector. Sourced "
+                        "from Sectorbench (Destatis, Eurostat, Bundesbank). Use "
+                        "this to give the user industry context alongside a "
+                        "company-level Boniscore."
+                    ),
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "fetch_run_id": {"type": "integer"},
+                                            "fetched_at": {"type": "string", "format": "date-time"},
+                                            "weight_profile": {"type": "string"},
+                                            "scores": {
+                                                "type": "array",
+                                                "items": {"$ref": "#/components/schemas/BranchScore"},
+                                            },
+                                        },
+                                    }
+                                }
+                            },
+                        }
+                    },
+                }
+            },
+            "/api/v1/branches/ranking": {
+                "get": {
+                    "operationId": "getBranchRanking",
+                    "summary": "Cross-sector ranking sorted by rank.",
+                    "responses": {"200": {"description": "OK"}},
+                }
+            },
+            "/api/v1/branches/{branch_key}": {
+                "get": {
+                    "operationId": "getBranch",
+                    "summary": "Current scores for a single branch.",
+                    "parameters": [
+                        {
+                            "in": "path",
+                            "name": "branch_key",
+                            "required": True,
+                            "schema": {"$ref": "#/components/schemas/BranchKey"},
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/BranchScore"}
+                                }
+                            },
+                        }
+                    },
+                }
+            },
+            "/api/v1/branches/{branch_key}/history": {
+                "get": {
+                    "operationId": "getBranchHistory",
+                    "summary": "12-month history of composite + dimension scores.",
+                    "parameters": [
+                        {
+                            "in": "path",
+                            "name": "branch_key",
+                            "required": True,
+                            "schema": {"$ref": "#/components/schemas/BranchKey"},
+                        },
+                        {
+                            "in": "query",
+                            "name": "months",
+                            "required": False,
+                            "schema": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 24,
+                                "default": 12,
+                            },
+                        },
+                    ],
+                    "responses": {"200": {"description": "OK"}},
+                }
+            },
+            "/api/v1/branches/{branch_key}/news": {
+                "get": {
+                    "operationId": "getBranchNews",
+                    "summary": "Latest monthly sector news report (AI-summarised).",
+                    "description": (
+                        "Returns the most recent monthly briefing for the sector "
+                        "with executive overview, key developments, risk watchlist, "
+                        "and cited sources."
+                    ),
+                    "parameters": [
+                        {
+                            "in": "path",
+                            "name": "branch_key",
+                            "required": True,
+                            "schema": {"$ref": "#/components/schemas/BranchKey"},
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/NewsReport"}
+                                }
+                            },
+                        }
+                    },
+                }
+            },
+            "/api/v1/branches/{branch_key}/insolvency/history": {
+                "get": {
+                    "operationId": "getBranchInsolvencyHistory",
+                    "summary": "Monthly insolvency case counts per sector (Destatis 52411-0019).",
+                    "parameters": [
+                        {
+                            "in": "path",
+                            "name": "branch_key",
+                            "required": True,
+                            "schema": {"$ref": "#/components/schemas/BranchKey"},
+                        },
+                        {
+                            "in": "query",
+                            "name": "months",
+                            "required": False,
+                            "schema": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 36,
+                                "default": 12,
+                            },
+                        },
+                    ],
+                    "responses": {"200": {"description": "OK"}},
+                }
+            },
+            "/api/v1/branches/{branch_key}/indicators/{indicator_key}/history": {
+                "get": {
+                    "operationId": "getBranchIndicatorHistory",
+                    "summary": "Time series for one economic indicator within a branch.",
+                    "parameters": [
+                        {
+                            "in": "path",
+                            "name": "branch_key",
+                            "required": True,
+                            "schema": {"$ref": "#/components/schemas/BranchKey"},
+                        },
+                        {
+                            "in": "path",
+                            "name": "indicator_key",
+                            "required": True,
+                            "schema": {"type": "string"},
+                            "description": "e.g. financial.insolvency_cases. See listIndicators.",
+                        },
+                        {
+                            "in": "query",
+                            "name": "months",
+                            "required": False,
+                            "schema": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 24,
+                                "default": 12,
+                            },
+                        },
+                    ],
+                    "responses": {"200": {"description": "OK"}},
+                }
+            },
+            "/api/v1/indicators": {
+                "get": {
+                    "operationId": "listIndicators",
+                    "summary": "Catalog of available sector indicators with metadata.",
+                    "responses": {"200": {"description": "OK"}},
+                }
+            },
+            "/api/v1/sectorbench/meta": {
+                "get": {
+                    "operationId": "getSectorbenchMeta",
+                    "summary": "Sectorbench API + data freshness metadata.",
+                    "responses": {"200": {"description": "OK"}},
+                }
+            },
         },
     }
 
@@ -508,6 +1108,38 @@ def routes() -> list[Route]:
         Route(
             "/api/v1/reports/{report_id}/financial_data/analysis",
             get_report_financial_analysis,
+            methods=["GET"],
+        ),
+        # Sectorbench proxy. Static segments (`branches`, `branches/ranking`,
+        # `indicators`, `sectorbench/meta`) come BEFORE the {branch_key}
+        # variants so Starlette resolves them first.
+        Route("/api/v1/branches", list_branch_scores, methods=["GET"]),
+        Route("/api/v1/branches/ranking", get_branch_ranking, methods=["GET"]),
+        Route("/api/v1/indicators", list_indicators, methods=["GET"]),
+        Route("/api/v1/sectorbench/meta", get_sectorbench_meta, methods=["GET"]),
+        Route(
+            "/api/v1/branches/{branch_key}/history",
+            get_branch_history,
+            methods=["GET"],
+        ),
+        Route(
+            "/api/v1/branches/{branch_key}/news",
+            get_branch_news,
+            methods=["GET"],
+        ),
+        Route(
+            "/api/v1/branches/{branch_key}/insolvency/history",
+            get_branch_insolvency_history,
+            methods=["GET"],
+        ),
+        Route(
+            "/api/v1/branches/{branch_key}/indicators/{indicator_key}/history",
+            get_branch_indicator_history,
+            methods=["GET"],
+        ),
+        Route(
+            "/api/v1/branches/{branch_key}",
+            get_branch,
             methods=["GET"],
         ),
     ]

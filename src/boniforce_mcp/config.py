@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
     jwt_audience: str = ""
+    sectorbench_base: str = "https://sectorbench.theaiwhisperer.cloud/api/v1"
+    sectorbench_token: str = ""
+    sectorbench_cache_ttl: int = 600
 
     @property
     def issuer(self) -> str:
