@@ -1,10 +1,12 @@
 # Boniforce for ChatGPT & Claude
 
-**Bring instant German credit checks straight into your AI chat.**
+**Bring instant German credit checks and sector intelligence straight into your AI chat.**
 
-Ask ChatGPT or Claude *"What's the Boniscore of Müller GmbH?"* and get a real
-answer — pulled live from [Boniforce](https://api.boniforce.de) — in seconds.
-No tab-switching, no copy-paste, no extra logins.
+Ask ChatGPT or Claude *"What's the Boniscore of Müller GmbH — and how is the
+construction sector doing?"* and get a real answer — pulled live from
+[Boniforce](https://api.boniforce.de) and
+[Sectorbench](https://sectorbench.theaiwhisperer.cloud) — in seconds. No
+tab-switching, no copy-paste, no extra logins.
 
 ---
 
@@ -25,9 +27,16 @@ Bundesanzeiger filings.
 you can ask follow-ups in plain language: *"Compare it to last year"*,
 *"Should I raise the limit?"*, *"Spit out an email to the customer."*
 
+🏭 **German sector intelligence** — current branch-health score (0–100),
+12-month trend, monthly news briefing, and Destatis insolvency series
+for 10 sectors (Automotive, Construction, Healthcare, Renewable Energy,
+Logistics, FinTech, IT Services, Retail, Hospitality, Manufacturing).
+Sourced from Destatis, Eurostat, and Bundesbank via Sectorbench.
+
 🔐 **Your data stays yours** — the connector uses your personal Boniforce
 API key. We never see passwords. Revoke access in one click from your
-Boniforce dashboard.
+Boniforce dashboard. Sector data uses a shared operator token, invisible
+to you.
 
 ---
 
@@ -138,6 +147,12 @@ The Boniforce tools now appear in your chat sidebar. Sample prompts:
 
 > *"List the last five reports I generated."*
 
+> *"Wie ist die aktuelle Lage in der Bauwirtschaft? Score, Trend, Insolvenzen."*
+
+> *"Give me the construction sector outlook and compare it to manufacturing."*
+
+> *"Boniscore für Müller GmbH plus Branchen-Briefing für Logistik."*
+
 ---
 
 ## Frequently asked
@@ -186,6 +201,10 @@ identity — no shared sessions.
 | *"Show me the balance-sheet history."*                       | `get_report_financial_data` |
 | *"What's the equity ratio trend the last three years?"*      | `get_report_financial_analysis` |
 | *"Which reports did I generate this week?"*                  | `list_reports`              |
+| *"How is the construction sector doing?"*                    | `getBranch` (sector score)  |
+| *"Give me the latest news briefing for automotive."*         | `getBranchNews`             |
+| *"Show me 12 months of insolvencies in retail."*             | `getBranchInsolvencyHistory`|
+| *"Rank all 10 German sectors by health score."*              | `getBranchRanking`          |
 
 The agent picks the right tool sequence on its own — you just describe what
 you want in plain language (German or English).
@@ -206,13 +225,17 @@ ChatGPT / Claude  ──HTTPS──▶  reverse proxy (Caddy or Traefik)
                                    ▼
                               FastMCP server (Python 3.11)
                                    │
-                                   ├─ OAuth 2.1 + DCR + PKCE  (auth.py)
-                                   ├─ MCP Streamable HTTP    (server.py)
-                                   ├─ httpx wrapper          (boniforce_client.py)
-                                   └─ SQLite + Fernet        (storage.py, crypto.py)
+                                   ├─ OAuth 2.1 + DCR + PKCE     (auth.py)
+                                   ├─ MCP Streamable HTTP        (server.py)
+                                   ├─ REST + OpenAPI mirror      (rest_api.py)
+                                   ├─ Boniforce httpx wrapper    (boniforce_client.py)
+                                   ├─ Sectorbench httpx wrapper  (sectorbench_client.py)
+                                   └─ SQLite + Fernet            (storage.py, crypto.py)
                                    │
-                                   ▼
-                              api.boniforce.de
+                ┌──────────────────┼─────────────────────────────┐
+                ▼                                                ▼
+       api.boniforce.de                       sectorbench.theaiwhisperer.cloud
+       (per-user sk_live key)                 (shared sbk_ operator token)
 ```
 
 The Boniforce API key submitted by a user is validated against
@@ -230,6 +253,26 @@ The Boniforce API key submitted by a user is validated against
 | `get_job_status`                  | `GET /v1/jobs/{job_id}/status`                                  |
 | `get_report_financial_data`       | `GET /v1/reports/{report_id}/financial_data`                    |
 | `get_report_financial_analysis`   | `GET /v1/reports/{report_id}/financial_data/analysis`           |
+
+### Sectorbench REST endpoints (Custom GPT Actions only)
+
+Exposed via the REST mirror + OpenAPI spec at `/api/openapi.json`. JWT-gated
+(reuses the same OAuth flow); upstream call uses the operator's shared
+Sectorbench token from `BF_SECTORBENCH_TOKEN`. Returns 503 when unset.
+
+| operationId                  | HTTP                                                                  |
+|------------------------------|-----------------------------------------------------------------------|
+| `listBranchScores`           | `GET /api/v1/branches`                                                |
+| `getBranchRanking`           | `GET /api/v1/branches/ranking`                                        |
+| `getBranch`                  | `GET /api/v1/branches/{branch_key}`                                   |
+| `getBranchHistory`           | `GET /api/v1/branches/{branch_key}/history?months=12`                 |
+| `getBranchNews`              | `GET /api/v1/branches/{branch_key}/news`                              |
+| `getBranchInsolvencyHistory` | `GET /api/v1/branches/{branch_key}/insolvency/history?months=12`      |
+| `getBranchIndicatorHistory`  | `GET /api/v1/branches/{branch_key}/indicators/{indicator_key}/history`|
+| `listIndicators`             | `GET /api/v1/indicators`                                              |
+| `getSectorbenchMeta`         | `GET /api/v1/sectorbench/meta`                                        |
+
+`branch_key` ∈ `automotive | healthcare | construction | renewable_energy | logistics | fintech | it_services | retail | hospitality | manufacturing`. In-memory TTL cache (default 600s) shields the shared 600 req/h Sectorbench quota.
 
 ### Quick deploy (Docker + Caddy)
 
