@@ -25,8 +25,8 @@ from starlette.types import ASGIApp
 from . import auth, rest_api, storage
 from .boniforce_client import BoniforceClient, BoniforceError
 from .config import get_settings
-from .rest_api import annotate_job_outcome
-from .sectorbench_client import SectorbenchClient
+from .rest_api import SECTORBENCH_BRANCH_KEYS, annotate_job_outcome
+from .sectorbench_client import SectorbenchClient, SectorbenchError
 
 
 def _build_verifier() -> JWTVerifier:
@@ -41,6 +41,10 @@ def _build_verifier() -> JWTVerifier:
 
 def _bf_client_from_state() -> BoniforceClient:
     return _client_holder["client"]
+
+
+def _sectorbench_client_from_state() -> SectorbenchClient:
+    return _client_holder["sectorbench"]
 
 
 _client_holder: dict[str, Any] = {}
@@ -92,18 +96,39 @@ def _make_mcp() -> FastMCP:
             "asks about a company that may already have a fresh report.\n\n"
             "404 from get_report_financial_* means no Bundesanzeiger annual filing exists\n"
             "yet for that company; report this as a data-availability issue, not an API\n"
-            "error. The Boniscore itself from get_report is still valid in that case."
+            "error. The Boniscore itself from get_report is still valid in that case.\n\n"
+            "SECTORBENCH BRANCH-DATA TOOLS (German sector intelligence):\n"
+            "  list_branch_scores / get_branch_ranking — overview across the 10 covered\n"
+            "    sectors (automotive, healthcare, construction, renewable_energy,\n"
+            "    logistics, fintech, it_services, retail, hospitality, manufacturing).\n"
+            "  get_branch(branch_key) — current composite score (0-100, higher=healthier),\n"
+            "    risk_level, dimensions, rank.\n"
+            "  get_branch_history / get_branch_insolvency_history / get_branch_indicator_history\n"
+            "    — monthly time series (months 1-24, default 12; insolvency up to 36).\n"
+            "  get_branch_news(branch_key) — current monthly AI-written briefing.\n"
+            "  list_branch_indicators / get_sectorbench_meta — catalog + freshness.\n"
+            "  Use these to enrich a Boniscore answer with sector context, e.g. compare\n"
+            "  a company's risk against its industry's branch-health trend."
         ),
         auth=_build_verifier(),
     )
 
-    async def _user_token() -> tuple[str, str]:
+    async def _user_only() -> str:
+        """Validate the JWT and return the user_id. No Boniforce key required.
+
+        Used by Sectorbench tools — they call upstream with the operator's
+        shared sbk_… token, not the user's Boniforce key.
+        """
         access = get_access_token()
         if access is None or not access.claims:
             raise ToolError("Not authenticated.")
         user_id = access.claims.get("sub")
         if not user_id:
             raise ToolError("Token missing subject claim.")
+        return user_id
+
+    async def _user_token() -> tuple[str, str]:
+        user_id = await _user_only()
         bf = await storage.get_bf_token(user_id)
         if not bf:
             issuer = get_settings().issuer
@@ -242,6 +267,145 @@ def _make_mcp() -> FastMCP:
             return await _bf_client_from_state().get_report_financial_analysis(token, report_id)
         except BoniforceError as e:
             raise _wrap(e)
+
+    # ---- Sectorbench branch-data tools ----
+    #
+    # Auth model differs from the Boniforce tools above: the per-user JWT
+    # only gates access (via _user_token), upstream is called with the
+    # operator-issued shared sbk_… token configured server-side. End users
+    # do NOT need a Sectorbench key. Mirrors rest_api.py /api/v1/branches/*.
+
+    def _wrap_sb(exc: SectorbenchError) -> ToolError:
+        if exc.status in (401, 403):
+            return ToolError(
+                "Sectorbench upstream rejected the operator token "
+                "(server config issue, not a user problem)."
+            )
+        return ToolError(f"Sectorbench API returned {exc.status}: {exc.body}")
+
+    def _validate_branch(branch_key: str) -> None:
+        if branch_key not in SECTORBENCH_BRANCH_KEYS:
+            raise ToolError(
+                f"Unknown branch_key '{branch_key}'. Valid: "
+                f"{', '.join(sorted(SECTORBENCH_BRANCH_KEYS))}."
+            )
+
+    def _clamp_months(months: int, maximum: int) -> int:
+        if months < 1 or months > maximum:
+            raise ToolError(f"months must be between 1 and {maximum}.")
+        return months
+
+    @mcp.tool
+    async def list_branch_scores() -> Any:
+        """Sectorbench: current branch-health composite scores (0-100) for
+        all 10 covered German sectors. Returns dimensions, risk_level,
+        confidence, rank per branch."""
+        await _user_only()
+        try:
+            return await _sectorbench_client_from_state().get_all_scores()
+        except SectorbenchError as e:
+            raise _wrap_sb(e)
+
+    @mcp.tool
+    async def get_branch_ranking() -> Any:
+        """Sectorbench: cross-sector ranking (1-10) by composite score, with
+        rank deltas vs. the prior reference period."""
+        await _user_only()
+        try:
+            return await _sectorbench_client_from_state().get_ranking()
+        except SectorbenchError as e:
+            raise _wrap_sb(e)
+
+    @mcp.tool
+    async def get_branch(branch_key: str) -> Any:
+        """Sectorbench: current composite score + dimensions + rank for one
+        branch. branch_key ∈ automotive, healthcare, construction,
+        renewable_energy, logistics, fintech, it_services, retail,
+        hospitality, manufacturing."""
+        await _user_only()
+        _validate_branch(branch_key)
+        try:
+            return await _sectorbench_client_from_state().get_branch(branch_key)
+        except SectorbenchError as e:
+            raise _wrap_sb(e)
+
+    @mcp.tool
+    async def get_branch_history(branch_key: str, months: int = 12) -> Any:
+        """Sectorbench: monthly composite-score history for one branch
+        (months 1-24, default 12)."""
+        await _user_only()
+        _validate_branch(branch_key)
+        m = _clamp_months(months, 24)
+        try:
+            return await _sectorbench_client_from_state().get_branch_history(
+                branch_key, m
+            )
+        except SectorbenchError as e:
+            raise _wrap_sb(e)
+
+    @mcp.tool
+    async def get_branch_news(branch_key: str) -> Any:
+        """Sectorbench: current monthly AI-written news briefing for one
+        branch (key drivers, risks, outlook)."""
+        await _user_only()
+        _validate_branch(branch_key)
+        try:
+            return await _sectorbench_client_from_state().get_branch_news(branch_key)
+        except SectorbenchError as e:
+            raise _wrap_sb(e)
+
+    @mcp.tool
+    async def get_branch_insolvency_history(
+        branch_key: str, months: int = 12
+    ) -> Any:
+        """Sectorbench: Destatis insolvency case-count series for one branch
+        (months 1-36, default 12)."""
+        await _user_only()
+        _validate_branch(branch_key)
+        m = _clamp_months(months, 36)
+        try:
+            return await _sectorbench_client_from_state().get_branch_insolvency_history(
+                branch_key, m
+            )
+        except SectorbenchError as e:
+            raise _wrap_sb(e)
+
+    @mcp.tool
+    async def get_branch_indicator_history(
+        branch_key: str, indicator_key: str, months: int = 12
+    ) -> Any:
+        """Sectorbench: monthly history of one indicator (e.g. ifo_index,
+        composite_pmi) within one branch (months 1-24, default 12). Use
+        list_branch_indicators to discover indicator_key values."""
+        await _user_only()
+        _validate_branch(branch_key)
+        m = _clamp_months(months, 24)
+        try:
+            return await _sectorbench_client_from_state().get_indicator_history(
+                branch_key, indicator_key, m
+            )
+        except SectorbenchError as e:
+            raise _wrap_sb(e)
+
+    @mcp.tool
+    async def list_branch_indicators() -> Any:
+        """Sectorbench: catalog of all indicator_keys available across the
+        branches (with units, source, description)."""
+        await _user_only()
+        try:
+            return await _sectorbench_client_from_state().get_indicator_catalog()
+        except SectorbenchError as e:
+            raise _wrap_sb(e)
+
+    @mcp.tool
+    async def get_sectorbench_meta() -> Any:
+        """Sectorbench: data-freshness metadata (last fetch_run_id, fetched_at,
+        coverage). Use to decide whether cached scores are stale."""
+        await _user_only()
+        try:
+            return await _sectorbench_client_from_state().meta()
+        except SectorbenchError as e:
+            raise _wrap_sb(e)
 
     return mcp
 
