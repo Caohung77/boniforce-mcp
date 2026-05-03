@@ -4,6 +4,28 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-05-03
+
+### Changed
+- **Sectorbench tool descriptions rewritten with German keyword bait.**
+  Models (Claude.ai + ChatGPT) were falling through to web search for
+  German-language branch questions because the v0.3.0 docstrings were
+  English-only and terse. Each Sectorbench tool now mentions the German
+  trigger phrases it should respond to (Branche, Insolvenzen, Pleiten,
+  Verlauf, Trend, Branchen-Briefing, etc.).
+- **Server `instructions` block** gains a German→`branch_key` mapping
+  table (Bauwirtschaft → construction, Einzelhandel → retail, …) plus a
+  per-tool selection guide ("Insolvenzen / Pleiten in <Branche>" →
+  `get_branch_insolvency_history`) and an explicit "NIEMALS websearch
+  verwenden" directive for branch questions.
+- All Sectorbench tool docstrings stay under 300 chars (GPT Builder cap).
+
+### Notes
+- No API or behaviour change. Pure prompting / discoverability fix.
+- After deploy, end users may need to start a fresh chat (or
+  disconnect / reconnect the connector) so the client re-fetches the
+  updated `tools/list` and `instructions`.
+
 ## [0.3.0] — 2026-05-03
 
 ### Added
@@ -110,6 +132,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pytest suite (10 tests) covering httpx client, full OAuth 2.1 PKCE +
   DCR + refresh, JWKS shape, and REST endpoints.
 
+[0.3.1]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Caohung77/boniforce-mcp/commits/main
