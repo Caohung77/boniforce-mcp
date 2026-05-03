@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "boniforce-mcp"
-version = "0.1.0"
-description = "Remote MCP server for the Boniforce API (ChatGPT + Claude connectors)."
+version = "0.2.0"
+description = "Remote MCP server for the Boniforce + Sectorbench APIs (ChatGPT + Claude connectors)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
