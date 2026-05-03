@@ -141,19 +141,42 @@ End-user flow inside the public GPT:
 
 ### Try it
 
-The Boniforce tools now appear in your chat sidebar. Sample prompts:
+Die Boniforce-Tools tauchen nach dem Verbinden in deiner Chat-Seitenleiste
+auf. Beispiel-Fragen:
+
+**Boniscore — einzelne Firmen prüfen**
 
 > *"Erstelle mir einen Boniforce-Bericht für die Boniforce GmbH und gib mir Score und Kreditlimit."*
 
-> *"Search Boniforce for SAP SE and tell me the latest score."*
+> *"Such Müller GmbH bei Boniforce und zeig mir den aktuellen Boniscore."*
 
-> *"List the last five reports I generated."*
+> *"Liste die letzten fünf Berichte, die ich generiert habe."*
+
+> *"Wie ist die Eigenkapitalquote-Entwicklung der letzten drei Jahre für SAP SE?"*
+
+**Sectorbench — deutsche Branchen-Intelligenz**
 
 > *"Wie ist die aktuelle Lage in der Bauwirtschaft? Score, Trend, Insolvenzen."*
 
-> *"Give me the construction sector outlook and compare it to manufacturing."*
+> *"Ranke alle 10 deutschen Branchen nach Gesundheits-Score."*
+
+> *"Gib mir das aktuelle monatliche Briefing für die Automobilindustrie."*
+
+> *"Insolvenz-Trend Einzelhandel der letzten 24 Monate."*
+
+> *"Score-Verlauf der Logistik-Branche der letzten 12 Monate, bitte mit Trend-Bewertung."*
+
+> *"Welche Indikatoren gibt's für Healthcare? Dann zeig mir den ifo-Index Verlauf."*
+
+> *"Wie aktuell sind die Sectorbench-Daten gerade?"*
+
+**Boniscore + Branche kombiniert**
 
 > *"Boniscore für Müller GmbH plus Branchen-Briefing für Logistik."*
+
+> *"Prüf die Bonität der Solar Bau GmbH und vergleich sie mit der Lage der Branche Erneuerbare Energien."*
+
+> *"Erstelle einen Bericht für Lufthansa Cargo und gib mir parallel den aktuellen Logistik-Branchen-Trend."*
 
 ---
 
