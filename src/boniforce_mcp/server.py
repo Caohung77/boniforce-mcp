@@ -97,18 +97,38 @@ def _make_mcp() -> FastMCP:
             "404 from get_report_financial_* means no Bundesanzeiger annual filing exists\n"
             "yet for that company; report this as a data-availability issue, not an API\n"
             "error. The Boniscore itself from get_report is still valid in that case.\n\n"
-            "SECTORBENCH BRANCH-DATA TOOLS (German sector intelligence):\n"
-            "  list_branch_scores / get_branch_ranking — overview across the 10 covered\n"
-            "    sectors (automotive, healthcare, construction, renewable_energy,\n"
-            "    logistics, fintech, it_services, retail, hospitality, manufacturing).\n"
-            "  get_branch(branch_key) — current composite score (0-100, higher=healthier),\n"
-            "    risk_level, dimensions, rank.\n"
-            "  get_branch_history / get_branch_insolvency_history / get_branch_indicator_history\n"
-            "    — monthly time series (months 1-24, default 12; insolvency up to 36).\n"
-            "  get_branch_news(branch_key) — current monthly AI-written briefing.\n"
-            "  list_branch_indicators / get_sectorbench_meta — catalog + freshness.\n"
-            "  Use these to enrich a Boniscore answer with sector context, e.g. compare\n"
-            "  a company's risk against its industry's branch-health trend."
+            "SECTORBENCH BRANCH-DATA TOOLS (deutsche Branchen-Intelligenz):\n"
+            "  Use these tools — NEVER websearch — when the question mentions:\n"
+            "  Branche, Branchen, Industrie, Sektor, sector, Branchen-Score,\n"
+            "  Branchen-Trend, Branchen-Lage, Branchen-Ranking, Branchen-Vergleich,\n"
+            "  Branchen-News, Branchen-Briefing, Insolvenzen, Pleiten, Insolvenzfälle,\n"
+            "  market overview, sector outlook, industry health, ifo, PMI.\n\n"
+            "  Branch-key mapping (German label → branch_key argument):\n"
+            "    Automobilindustrie / Autobranche / Automobil       → automotive\n"
+            "    Gesundheitswesen / Pharma / Medizin                → healthcare\n"
+            "    Bauwirtschaft / Bau / Bauindustrie                 → construction\n"
+            "    Erneuerbare Energien / Solar / Wind                → renewable_energy\n"
+            "    Logistik / Transport / Spedition                   → logistics\n"
+            "    Fintech / Banken / Finanzdienstleister             → fintech\n"
+            "    IT / IT-Dienstleister / Software                   → it_services\n"
+            "    Einzelhandel / Retail / Handel                     → retail\n"
+            "    Gastgewerbe / Hotellerie / Gastronomie             → hospitality\n"
+            "    Industrie / Produzierendes Gewerbe / Manufacturing → manufacturing\n\n"
+            "  Tool selection:\n"
+            "    'Score / Lage / Stand der <Branche>'               → get_branch\n"
+            "    'Verlauf / Trend / Entwicklung der <Branche>'      → get_branch_history\n"
+            "    'Insolvenzen / Pleiten in <Branche>'               → get_branch_insolvency_history\n"
+            "    'News / Briefing / aktuelle Lage <Branche>'        → get_branch_news\n"
+            "    'Ranking / welche Branche am besten/schlechtesten' → get_branch_ranking\n"
+            "    'alle Branchen / Übersicht / Vergleich'            → list_branch_scores\n"
+            "    'ifo / PMI / Einzel-Indikator'                     → list_branch_indicators\n"
+            "                                                          → get_branch_indicator_history\n"
+            "    'wie aktuell sind die Daten'                       → get_sectorbench_meta\n\n"
+            "  Daten kommen aus Sectorbench (Destatis-Insolvenzen, ifo-Index,\n"
+            "  composite-PMI, ZEW, etc.). Für Branchen-Fragen NIEMALS websearch\n"
+            "  verwenden — diese Tools liefern offizielle, aktuelle deutsche Daten.\n"
+            "  Kombinier gerne Boniscore (einzelne Firma) + Branchen-Score (Kontext)\n"
+            "  in einer Antwort, z.B. 'Müller Bau GmbH Boniscore plus Bauwirtschaft-Trend'."
         ),
         auth=_build_verifier(),
     )
@@ -297,9 +317,10 @@ def _make_mcp() -> FastMCP:
 
     @mcp.tool
     async def list_branch_scores() -> Any:
-        """Sectorbench: current branch-health composite scores (0-100) for
-        all 10 covered German sectors. Returns dimensions, risk_level,
-        confidence, rank per branch."""
+        """Branchen-Übersicht: aktuelle Score (0-100) für alle 10 deutschen
+        Branchen (Automobil, Healthcare, Bau, Erneuerbare, Logistik, Fintech,
+        IT, Einzelhandel, Gastgewerbe, Industrie). Use for 'alle Branchen',
+        'Branchen-Übersicht', 'Sektor-Vergleich', sector overview."""
         await _user_only()
         try:
             return await _sectorbench_client_from_state().get_all_scores()
@@ -308,8 +329,9 @@ def _make_mcp() -> FastMCP:
 
     @mcp.tool
     async def get_branch_ranking() -> Any:
-        """Sectorbench: cross-sector ranking (1-10) by composite score, with
-        rank deltas vs. the prior reference period."""
+        """Branchen-Ranking 1-10 nach Score, mit Rank-Delta zum Vormonat. Use
+        for 'Ranking', 'welche Branche steht am besten/schlechtesten',
+        'Gewinner/Verlierer Branchen', sector league table."""
         await _user_only()
         try:
             return await _sectorbench_client_from_state().get_ranking()
@@ -318,10 +340,11 @@ def _make_mcp() -> FastMCP:
 
     @mcp.tool
     async def get_branch(branch_key: str) -> Any:
-        """Sectorbench: current composite score + dimensions + rank for one
-        branch. branch_key ∈ automotive, healthcare, construction,
-        renewable_energy, logistics, fintech, it_services, retail,
-        hospitality, manufacturing."""
+        """Aktueller Branchen-Score (composite 0-100, dimensions, risk_level,
+        rank) für eine deutsche Branche. branch_key ∈ automotive, healthcare,
+        construction, renewable_energy, logistics, fintech, it_services,
+        retail, hospitality, manufacturing. (Mapping deutsch → key siehe
+        Server-Instructions.)"""
         await _user_only()
         _validate_branch(branch_key)
         try:
@@ -331,8 +354,9 @@ def _make_mcp() -> FastMCP:
 
     @mcp.tool
     async def get_branch_history(branch_key: str, months: int = 12) -> Any:
-        """Sectorbench: monthly composite-score history for one branch
-        (months 1-24, default 12)."""
+        """Score-Verlauf einer deutschen Branche, monatlich (months 1-24,
+        default 12). Use for 'Verlauf', 'Trend', 'Entwicklung', 'wie hat sich
+        <Branche> entwickelt', 'historischer Score', monthly trend."""
         await _user_only()
         _validate_branch(branch_key)
         m = _clamp_months(months, 24)
@@ -345,8 +369,10 @@ def _make_mcp() -> FastMCP:
 
     @mcp.tool
     async def get_branch_news(branch_key: str) -> Any:
-        """Sectorbench: current monthly AI-written news briefing for one
-        branch (key drivers, risks, outlook)."""
+        """Aktuelles monatliches Branchen-Briefing (KI-geschrieben) für eine
+        deutsche Branche: Treiber, Risiken, Ausblick. Use for 'aktuelle Lage',
+        'News', 'Briefing', 'was ist los in <Branche>', 'monatliche
+        Zusammenfassung', 'sector update', 'monthly outlook'."""
         await _user_only()
         _validate_branch(branch_key)
         try:
@@ -358,8 +384,10 @@ def _make_mcp() -> FastMCP:
     async def get_branch_insolvency_history(
         branch_key: str, months: int = 12
     ) -> Any:
-        """Sectorbench: Destatis insolvency case-count series for one branch
-        (months 1-36, default 12)."""
+        """Insolvenz-Trend einer deutschen Branche (Destatis-Daten, months
+        1-36, default 12). Insolvenzen, Pleiten, Insolvenzfälle pro Monat.
+        Use for 'Insolvenzen Einzelhandel', 'Pleiten Bau', 'wie viele
+        Insolvenzen', 'Insolvenz-Verlauf', 'bankruptcy trend'."""
         await _user_only()
         _validate_branch(branch_key)
         m = _clamp_months(months, 36)
@@ -374,9 +402,10 @@ def _make_mcp() -> FastMCP:
     async def get_branch_indicator_history(
         branch_key: str, indicator_key: str, months: int = 12
     ) -> Any:
-        """Sectorbench: monthly history of one indicator (e.g. ifo_index,
-        composite_pmi) within one branch (months 1-24, default 12). Use
-        list_branch_indicators to discover indicator_key values."""
+        """Verlauf eines Einzel-Indikators (z.B. ifo_index, composite_pmi,
+        zew_indicator, energiepreis) in einer deutschen Branche (months
+        1-24, default 12). Erst list_branch_indicators für gültige
+        indicator_key aufrufen. Use for 'ifo Bauwirtschaft', 'PMI Industrie'."""
         await _user_only()
         _validate_branch(branch_key)
         m = _clamp_months(months, 24)
@@ -389,8 +418,10 @@ def _make_mcp() -> FastMCP:
 
     @mcp.tool
     async def list_branch_indicators() -> Any:
-        """Sectorbench: catalog of all indicator_keys available across the
-        branches (with units, source, description)."""
+        """Katalog aller verfügbaren Indikatoren (indicator_key, Einheit,
+        Quelle, Beschreibung) für deutsche Branchen. Vor
+        get_branch_indicator_history aufrufen, um gültige indicator_key zu
+        finden. Use for 'welche Indikatoren', 'list indicators'."""
         await _user_only()
         try:
             return await _sectorbench_client_from_state().get_indicator_catalog()
@@ -399,8 +430,9 @@ def _make_mcp() -> FastMCP:
 
     @mcp.tool
     async def get_sectorbench_meta() -> Any:
-        """Sectorbench: data-freshness metadata (last fetch_run_id, fetched_at,
-        coverage). Use to decide whether cached scores are stale."""
+        """Sectorbench Daten-Aktualität: letzte fetch_run_id, fetched_at,
+        Branchen-Abdeckung, weight_profile. Use for 'wie aktuell sind die
+        Daten', 'wann zuletzt aktualisiert', data freshness check."""
         await _user_only()
         try:
             return await _sectorbench_client_from_state().meta()

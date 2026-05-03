@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "boniforce-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "Remote MCP server for the Boniforce + Sectorbench APIs (ChatGPT + Claude connectors)."
 readme = "README.md"
 requires-python = ">=3.11"
