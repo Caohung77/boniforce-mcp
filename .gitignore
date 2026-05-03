@@ -20,3 +20,8 @@ dist/
 .vscode/
 .idea/
 .DS_Store
+
+# local agent / operator notes — may contain prod hostnames, SSH coords,
+# secrets. Never commit. Each operator keeps their own.
+CLAUDE.md
+.claude/
