@@ -4,6 +4,39 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-05-03
+
+### Added
+- **Sectorbench branch-data tools on MCP.** The 9 sector-intelligence
+  endpoints (previously REST-only for ChatGPT Custom GPT Actions) are now
+  also exposed as native MCP tools, so Claude.ai connectors and the
+  ChatGPT MCP connector see them in the tool list:
+  - `list_branch_scores`
+  - `get_branch_ranking`
+  - `get_branch(branch_key)`
+  - `get_branch_history(branch_key, months=12)` — months 1-24
+  - `get_branch_news(branch_key)`
+  - `get_branch_insolvency_history(branch_key, months=12)` — months 1-36
+  - `get_branch_indicator_history(branch_key, indicator_key, months=12)` — months 1-24
+  - `list_branch_indicators`
+  - `get_sectorbench_meta`
+- New internal `_user_only()` helper in `server.py`: validates the JWT
+  without requiring a linked Boniforce key. Sectorbench tools call upstream
+  with the operator's shared `BF_SECTORBENCH_TOKEN`, so users without a
+  Boniforce `sk_live-…` key can still query branch data through MCP.
+
+### Changed
+- MCP `instructions` block expanded to document the Sectorbench tools and
+  hint at common follow-ups (sector context for a Boniscore answer).
+- Total MCP tools surfaced: **16** (was 7).
+
+### Notes
+- No behaviour change for existing 7 Boniforce tools.
+- REST `/api/v1/branches/*` mirror unchanged — Custom GPT Actions still
+  speak the same OpenAPI 3.1 spec.
+- No client-side migration needed: Claude / ChatGPT MCP clients
+  re-discover tools on next connection.
+
 ## [0.2.0] — 2026-05-03
 
 ### Added
@@ -77,5 +110,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pytest suite (10 tests) covering httpx client, full OAuth 2.1 PKCE +
   DCR + refresh, JWKS shape, and REST endpoints.
 
+[0.3.0]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Caohung77/boniforce-mcp/commits/main

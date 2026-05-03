@@ -120,15 +120,17 @@ you can wire it into a Custom GPT's *Aktionen* panel.
 
 3. Save → publish (Nur ich / Mit Link / Öffentlich).
 
-The same OpenAPI schema also exposes **branch-level sector data** for 10
-German industries (automotive, construction, healthcare, fintech, …) —
-current health scores, 12-month score history, AI-summarised monthly news
-reports, and Destatis insolvency trends — powered by
-[Sectorbench](https://sectorbench.theaiwhisperer.cloud). The Custom GPT
-authenticates with the same OAuth flow as the credit-data endpoints; the
+**Branch-level sector data** for 10 German industries (automotive,
+construction, healthcare, fintech, …) — current health scores, 12-month
+score history, AI-summarised monthly news reports, and Destatis insolvency
+trends — is also surfaced, powered by
+[Sectorbench](https://sectorbench.theaiwhisperer.cloud). Available **both
+through MCP** (Claude.ai connector + ChatGPT MCP connector) **and** via the
+Custom GPT OpenAPI schema. Same OAuth flow as the credit-data tools; the
 upstream Sectorbench call uses an operator-issued bearer token configured
-on the server (`BF_SECTORBENCH_TOKEN`). Try: *"Show me the construction
-sector's health score and the latest monthly outlook."*
+on the server (`BF_SECTORBENCH_TOKEN`), so end users don't need a separate
+Sectorbench key. Try: *"Show me the construction sector's health score and
+the latest monthly outlook."*
 
 End-user flow inside the public GPT:
 
@@ -201,10 +203,10 @@ identity — no shared sessions.
 | *"Show me the balance-sheet history."*                       | `get_report_financial_data` |
 | *"What's the equity ratio trend the last three years?"*      | `get_report_financial_analysis` |
 | *"Which reports did I generate this week?"*                  | `list_reports`              |
-| *"How is the construction sector doing?"*                    | `getBranch` (sector score)  |
-| *"Give me the latest news briefing for automotive."*         | `getBranchNews`             |
-| *"Show me 12 months of insolvencies in retail."*             | `getBranchInsolvencyHistory`|
-| *"Rank all 10 German sectors by health score."*              | `getBranchRanking`          |
+| *"How is the construction sector doing?"*                    | `get_branch` (sector score) |
+| *"Give me the latest news briefing for automotive."*         | `get_branch_news`           |
+| *"Show me 12 months of insolvencies in retail."*             | `get_branch_insolvency_history` |
+| *"Rank all 10 German sectors by health score."*              | `get_branch_ranking`        |
 
 The agent picks the right tool sequence on its own — you just describe what
 you want in plain language (German or English).
@@ -244,6 +246,9 @@ The Boniforce API key submitted by a user is validated against
 
 ### Tools exposed via MCP
 
+Boniforce credit-data tools (require a per-user `sk_live-…` key linked via
+the OAuth flow):
+
 | Tool                              | HTTP                                                            |
 |-----------------------------------|-----------------------------------------------------------------|
 | `search_companies`                | `GET /v1/search`                                                |
@@ -254,11 +259,25 @@ The Boniforce API key submitted by a user is validated against
 | `get_report_financial_data`       | `GET /v1/reports/{report_id}/financial_data`                    |
 | `get_report_financial_analysis`   | `GET /v1/reports/{report_id}/financial_data/analysis`           |
 
-### Sectorbench REST endpoints (Custom GPT Actions only)
+Sectorbench branch-data tools (JWT-gated; upstream call uses the operator's
+shared `BF_SECTORBENCH_TOKEN` — end users do **not** need a Sectorbench key):
 
-Exposed via the REST mirror + OpenAPI spec at `/api/openapi.json`. JWT-gated
-(reuses the same OAuth flow); upstream call uses the operator's shared
-Sectorbench token from `BF_SECTORBENCH_TOKEN`. Returns 503 when unset.
+| Tool                              | Sectorbench HTTP                                                |
+|-----------------------------------|-----------------------------------------------------------------|
+| `list_branch_scores`              | `GET /api/v1/scores`                                            |
+| `get_branch_ranking`              | `GET /api/v1/scores/ranking`                                    |
+| `get_branch`                      | `GET /api/v1/branches/{branch_key}`                             |
+| `get_branch_history`              | `GET /api/v1/branches/{branch_key}/history?months=12`           |
+| `get_branch_news`                 | `GET /api/v1/branches/{branch_key}/news`                        |
+| `get_branch_insolvency_history`   | `GET /api/v1/branches/{branch_key}/insolvency/history?months=12`|
+| `get_branch_indicator_history`    | `GET /api/v1/branches/{branch_key}/indicators/{indicator_key}/history` |
+| `list_branch_indicators`          | `GET /api/v1/indicators`                                        |
+| `get_sectorbench_meta`            | `GET /api/v1/meta`                                              |
+
+### Sectorbench REST endpoints (Custom GPT Actions surface)
+
+Same data, REST-shaped for ChatGPT Custom GPT Actions which speak OpenAPI 3.1
+rather than MCP. Spec at `/api/openapi.json`. Same JWT auth as `/mcp`.
 
 | operationId                  | HTTP                                                                  |
 |------------------------------|-----------------------------------------------------------------------|
