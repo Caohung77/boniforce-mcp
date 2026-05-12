@@ -9,8 +9,10 @@ Composition:
 """
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urlparse
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
@@ -19,8 +21,12 @@ from fastmcp.server.dependencies import get_access_token
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import JSONResponse
 from starlette.routing import Mount
+from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp
+from pathlib import Path
 
 from . import auth, rest_api, storage
 from .boniforce_client import BoniforceClient, BoniforceError
@@ -160,7 +166,15 @@ def _make_mcp() -> FastMCP:
     def _wrap(exc: BoniforceError) -> ToolError:
         return ToolError(f"Boniforce API returned {exc.status}: {exc.body}")
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Search German companies",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
     async def search_companies(query: str) -> Any:
         """Step 1 of Boniscore workflow: search Boniforce for a German company by
         name or partial name. Returns company entries each with company_name,
@@ -172,7 +186,15 @@ def _make_mcp() -> FastMCP:
         except BoniforceError as e:
             raise _wrap(e)
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "List previously generated reports",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    )
     async def list_reports() -> Any:
         """List previously generated reports for the account. Useful to check
         whether a company already has a finished report (avoids re-running
@@ -183,7 +205,15 @@ def _make_mcp() -> FastMCP:
         except BoniforceError as e:
             raise _wrap(e)
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Start a Boniscore report",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        }
+    )
     async def create_report(
         company_name: str,
         register_type: str,
@@ -230,7 +260,15 @@ def _make_mcp() -> FastMCP:
         annotate_job_outcome(data, data.get("job_id"), status_value)
         return data
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Fetch finished Boniscore report",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    )
     async def get_report(report_id: str) -> Any:
         """Step 4 of Boniscore workflow: fetch a finished report. Returns the
         Boniscore (0-100, higher=better creditworthiness), score_details
@@ -243,7 +281,15 @@ def _make_mcp() -> FastMCP:
         except BoniforceError as e:
             raise _wrap(e)
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Poll Boniscore job status",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    )
     async def get_job_status(job_id: str, wait_seconds: int = 40) -> Any:
         """Step 3 of Boniscore workflow: poll a report-generation job. status
         moves queued -> running -> completed (or failed). Typical time 30-120s.
@@ -265,7 +311,15 @@ def _make_mcp() -> FastMCP:
         annotate_job_outcome(data, job_id, (data or {}).get("status") if isinstance(data, dict) else None)
         return data
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Balance-sheet history",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    )
     async def get_report_financial_data(report_id: str) -> Any:
         """Optional drill-down: balance-sheet history for a finished report.
         Returns yearly Eigenkapital, Verbindlichkeiten, Bilanzsumme, etc.
@@ -277,7 +331,15 @@ def _make_mcp() -> FastMCP:
         except BoniforceError as e:
             raise _wrap(e)
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Per-year financial ratio analysis",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    )
     async def get_report_financial_analysis(report_id: str) -> Any:
         """Optional drill-down: per-year financial ratios + sub-scores
         (Eigenkapitalquote, Verbindlichkeitenquote, etc.) underlying the
@@ -315,7 +377,15 @@ def _make_mcp() -> FastMCP:
             raise ToolError(f"months must be between 1 and {maximum}.")
         return months
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "List German sector scores",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
     async def list_branch_scores() -> Any:
         """Branchen-Übersicht: aktuelle Score (0-100) für alle 10 deutschen
         Branchen (Automobil, Healthcare, Bau, Erneuerbare, Logistik, Fintech,
@@ -327,7 +397,15 @@ def _make_mcp() -> FastMCP:
         except SectorbenchError as e:
             raise _wrap_sb(e)
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Rank German sectors by health score",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
     async def get_branch_ranking() -> Any:
         """Branchen-Ranking 1-10 nach Score, mit Rank-Delta zum Vormonat. Use
         for 'Ranking', 'welche Branche steht am besten/schlechtesten',
@@ -338,7 +416,15 @@ def _make_mcp() -> FastMCP:
         except SectorbenchError as e:
             raise _wrap_sb(e)
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Sector snapshot",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
     async def get_branch(branch_key: str) -> Any:
         """Aktueller Branchen-Score (composite 0-100, dimensions, risk_level,
         rank) für eine deutsche Branche. branch_key ∈ automotive, healthcare,
@@ -352,7 +438,15 @@ def _make_mcp() -> FastMCP:
         except SectorbenchError as e:
             raise _wrap_sb(e)
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Sector score history",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
     async def get_branch_history(branch_key: str, months: int = 12) -> Any:
         """Score-Verlauf einer deutschen Branche, monatlich (months 1-24,
         default 12). Use for 'Verlauf', 'Trend', 'Entwicklung', 'wie hat sich
@@ -367,7 +461,15 @@ def _make_mcp() -> FastMCP:
         except SectorbenchError as e:
             raise _wrap_sb(e)
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Sector monthly briefing",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
     async def get_branch_news(branch_key: str) -> Any:
         """Aktuelles monatliches Branchen-Briefing (KI-geschrieben) für eine
         deutsche Branche: Treiber, Risiken, Ausblick. Use for 'aktuelle Lage',
@@ -380,7 +482,15 @@ def _make_mcp() -> FastMCP:
         except SectorbenchError as e:
             raise _wrap_sb(e)
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Sector insolvency history",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
     async def get_branch_insolvency_history(
         branch_key: str, months: int = 12
     ) -> Any:
@@ -398,7 +508,15 @@ def _make_mcp() -> FastMCP:
         except SectorbenchError as e:
             raise _wrap_sb(e)
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Sector indicator history",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
     async def get_branch_indicator_history(
         branch_key: str, indicator_key: str, months: int = 12
     ) -> Any:
@@ -416,7 +534,15 @@ def _make_mcp() -> FastMCP:
         except SectorbenchError as e:
             raise _wrap_sb(e)
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "List sector indicators",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
     async def list_branch_indicators() -> Any:
         """Katalog aller verfügbaren Indikatoren (indicator_key, Einheit,
         Quelle, Beschreibung) für deutsche Branchen. Vor
@@ -428,7 +554,15 @@ def _make_mcp() -> FastMCP:
         except SectorbenchError as e:
             raise _wrap_sb(e)
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "title": "Sectorbench data freshness",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
     async def get_sectorbench_meta() -> Any:
         """Sectorbench Daten-Aktualität: letzte fetch_run_id, fetched_at,
         Branchen-Abdeckung, weight_profile. Use for 'wie aktuell sind die
@@ -459,12 +593,84 @@ class WWWAuthenticateResourceMetadataMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# Anthropic Connectors Directory requires Origin-header validation on MCP
+# endpoints. Allowlist the two production chat-platform origins plus the
+# server's own issuer origin (used by the in-browser OAuth login form). A
+# missing Origin header is treated as a non-browser server-to-server call
+# and allowed through — those are still gated by OAuth.
+_DEFAULT_MCP_ORIGINS = {
+    "https://claude.ai",
+    "https://chatgpt.com",
+}
+
+
+def _allowed_mcp_origins() -> frozenset[str]:
+    extra = os.environ.get("BF_EXTRA_ALLOWED_ORIGINS", "")
+    extras = {o.strip() for o in extra.split(",") if o.strip()}
+    issuer_origin = ""
+    parsed = urlparse(get_settings().issuer)
+    if parsed.scheme and parsed.netloc:
+        issuer_origin = f"{parsed.scheme}://{parsed.netloc}"
+    return frozenset(_DEFAULT_MCP_ORIGINS | extras | ({issuer_origin} if issuer_origin else set()))
+
+
+class OriginAllowlistMiddleware(BaseHTTPMiddleware):
+    """Reject /mcp requests whose Origin header is set but not on the allowlist.
+
+    Required by Anthropic's Connectors Directory submission and defends
+    against DNS-rebinding attacks from malicious local pages.
+    """
+
+    async def dispatch(self, request, call_next):
+        if request.url.path.startswith("/mcp"):
+            origin = request.headers.get("origin")
+            if origin and origin not in _allowed_mcp_origins():
+                return JSONResponse(
+                    {"error": "origin_not_allowed", "origin": origin},
+                    status_code=403,
+                )
+        return await call_next(request)
+
+
+def _allowed_hosts() -> list[str]:
+    parsed = urlparse(get_settings().issuer)
+    host = parsed.hostname
+    extra = os.environ.get("BF_EXTRA_ALLOWED_HOSTS", "")
+    extras = [h.strip() for h in extra.split(",") if h.strip()]
+    base = [host] if host else []
+    # localhost / 127.0.0.1 always allowed so health checks and local dev
+    # don't break behind the reverse proxy.
+    return base + extras + ["localhost", "127.0.0.1", "testserver"]
+
+
+_PUBLIC_DIR = Path(__file__).resolve().parents[2] / "public"
+
+
+def _favicon_routes() -> list:
+    """Serve the Anthropic Connectors Directory branding assets (logo,
+    favicon, manifest icons) at /favicon/* so the submission form can
+    reference stable HTTPS URLs hosted on the MCP origin itself."""
+    favicon_dir = _PUBLIC_DIR / "favicon"
+    if not favicon_dir.is_dir():
+        return []
+    return [Mount("/favicon", app=StaticFiles(directory=str(favicon_dir)))]
+
+
 def build_app() -> Starlette:
     mcp = _make_mcp()
     mcp_app = mcp.http_app(path="/mcp", transport="http")
     outer = Starlette(
-        routes=[*auth.routes(), *rest_api.routes(), Mount("/", app=mcp_app)],
-        middleware=[Middleware(WWWAuthenticateResourceMetadataMiddleware)],
+        routes=[
+            *auth.routes(),
+            *rest_api.routes(),
+            *_favicon_routes(),
+            Mount("/", app=mcp_app),
+        ],
+        middleware=[
+            Middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts()),
+            Middleware(OriginAllowlistMiddleware),
+            Middleware(WWWAuthenticateResourceMetadataMiddleware),
+        ],
         lifespan=lambda _outer: _combined_lifespan(mcp_app),
     )
     return outer

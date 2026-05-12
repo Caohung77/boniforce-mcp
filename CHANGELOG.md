@@ -4,6 +4,57 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-05-12
+
+Prepares the server for submission to the Anthropic Connectors Directory.
+No breaking API changes.
+
+### Added
+- **Tool annotations on all 16 MCP tools.** Each `@mcp.tool` decorator
+  now carries `title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`,
+  and `openWorldHint` (MCP spec). `create_report` is the only non-read-only
+  / non-idempotent tool; everything else is read-only and idempotent.
+  Required field on the Anthropic submission form.
+- **Origin-header validation on `/mcp`.** New `OriginAllowlistMiddleware`
+  rejects requests whose `Origin` header is set but not on the allowlist
+  (`https://claude.ai`, `https://chatgpt.com`, the issuer origin, plus
+  anything in `BF_EXTRA_ALLOWED_ORIGINS`). Missing-Origin server-to-server
+  calls still pass; OAuth gates the actual access. Closes the
+  DNS-rebinding vector explicitly called out in the Anthropic Connectors
+  Directory submission policy.
+- **Host-header allowlist** via Starlette's `TrustedHostMiddleware`.
+  Defaults to the issuer hostname plus `localhost`, `127.0.0.1`,
+  `testserver`; extra hosts via `BF_EXTRA_ALLOWED_HOSTS`.
+- **Branding assets mount at `/favicon/*`.** Serves `favicon.svg`,
+  `favicon.ico`, `favicon-96x96.png`, `apple-touch-icon.png`, and
+  `web-app-manifest-512x512.png` from the new `public/favicon/` directory
+  so the Anthropic submission form can reference stable HTTPS URLs hosted
+  on the MCP origin. `deploy/Dockerfile` updated to `COPY public ./public`.
+- **Submission documentation under `docs/`:**
+  - `CONNECTOR_DIRECTORY_SUBMISSION.md` — phased spec, blocker matrix,
+    form-payload table, pre-submit verification script.
+  - `CONNECTOR_PUBLIC_DOCS.md` — drop-in user-facing docs page intended
+    for `boniforce.de/docs/mcp`.
+  - `PRIVACY_POLICY_MCP_ADDENDUM.md` — gap analysis of the existing
+    Datenschutzerklärung plus German + English text to splice in.
+- **New tests** (12 total, 42-pass suite):
+  - `tests/test_origin_rejection.py` — 6 tests covering allowed origins,
+    disallowed origins, missing Origin, well-known endpoints, Host
+    rejection.
+  - `tests/test_favicon_assets.py` — 6 tests covering each branding
+    asset path + MIME type + no directory-listing.
+
+### Configuration
+- New optional env vars: `BF_EXTRA_ALLOWED_ORIGINS`,
+  `BF_EXTRA_ALLOWED_HOSTS`. Defaults are safe for production at
+  `mcp.boniforce.de`; override only for staging or alternate hostnames.
+
+### Notes
+- No tool surface changes; existing connector users keep working.
+- Deployment requires the new `public/` directory to be present alongside
+  `src/`. Docker users get this automatically via the updated Dockerfile;
+  bare-metal operators should `git pull` before restarting.
+
 ## [0.3.1] — 2026-05-03
 
 ### Changed
