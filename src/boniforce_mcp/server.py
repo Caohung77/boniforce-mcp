@@ -643,14 +643,34 @@ def _allowed_hosts() -> list[str]:
     return base + extras + ["localhost", "127.0.0.1", "testserver"]
 
 
-_PUBLIC_DIR = Path(__file__).resolve().parents[2] / "public"
+def _public_dir() -> Path | None:
+    """Locate the bundled `public/` directory at runtime. Checked in order:
+    1. `BF_PUBLIC_DIR` env override.
+    2. `<cwd>/public` — set when running via `uvicorn` from the repo root
+       or the Docker WORKDIR `/app`.
+    3. `<repo-root>/public` relative to the source file — used in
+       editable installs / local dev.
+    Returns None if no candidate exists."""
+    candidates = []
+    env = os.environ.get("BF_PUBLIC_DIR")
+    if env:
+        candidates.append(Path(env))
+    candidates.append(Path.cwd() / "public")
+    candidates.append(Path(__file__).resolve().parents[2] / "public")
+    for c in candidates:
+        if c.is_dir():
+            return c
+    return None
 
 
 def _favicon_routes() -> list:
     """Serve the Anthropic Connectors Directory branding assets (logo,
     favicon, manifest icons) at /favicon/* so the submission form can
     reference stable HTTPS URLs hosted on the MCP origin itself."""
-    favicon_dir = _PUBLIC_DIR / "favicon"
+    pub = _public_dir()
+    if pub is None:
+        return []
+    favicon_dir = pub / "favicon"
     if not favicon_dir.is_dir():
         return []
     return [Mount("/favicon", app=StaticFiles(directory=str(favicon_dir)))]
