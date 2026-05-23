@@ -484,7 +484,17 @@ def _openapi_spec() -> dict[str, Any]:
                 "via OAuth 2.1 with the Boniforce MCP authorization server "
                 f"({iss}) — each end user pastes their own Boniforce API key "
                 "during the OAuth flow. After authorization the same JWT can "
-                "be used here as Bearer token."
+                "be used here as Bearer token.\n\n"
+                "**MANDATORY workflow for company questions:**\n"
+                "0. GET /api/v1/reports FIRST. If a completed report for the "
+                "company exists with created_at ≤30 days old, REUSE its "
+                "report_id (call /reports/{id} or /reports/{id}/financial_data). "
+                "Do NOT call POST /reports — that charges 1 credit and re-runs "
+                "a 30-120s computation that returns the same data.\n"
+                "1. Only if no fresh report exists: GET /api/v1/search → "
+                "POST /api/v1/reports → poll GET /api/v1/jobs/{id}/status?wait=40.\n"
+                "Follow-up questions about a company you already have a report_id "
+                "for: ALWAYS reuse that report_id, never POST /reports again."
             ),
         },
         "servers": [{"url": iss}],
@@ -564,6 +574,168 @@ def _openapi_spec() -> dict[str, Any]:
                 "Error": {
                     "type": "object",
                     "properties": {"error": {"type": "string"}},
+                },
+                "FinancialFeaturesYear": {
+                    "type": "object",
+                    "description": (
+                        "Per-year summary metrics used by the Boniscore engine. "
+                        "All amounts in EUR unless stated otherwise."
+                    ),
+                    "properties": {
+                        "jahr": {"type": "integer", "description": "Fiscal year (YYYY)."},
+                        "jahresueberschuss": {"type": "number", "nullable": True},
+                        "eigenkapital": {"type": "number", "nullable": True},
+                        "verbindlichkeiten": {"type": "number", "nullable": True},
+                        "umlaufvermoegen": {"type": "number", "nullable": True},
+                        "bilanzsumme": {"type": "number", "nullable": True},
+                        "forderungen": {"type": "number", "nullable": True},
+                        "liquide_mittel": {"type": "number", "nullable": True},
+                    },
+                },
+                "AktivaAnlagevermoegenDetails": {
+                    "type": "object",
+                    "properties": {
+                        "sachanlagen": {"type": "number", "nullable": True},
+                        "immaterielle_vermoegensgegenstaende": {"type": "number", "nullable": True},
+                        "finanzanlagen": {"type": "number", "nullable": True},
+                    },
+                },
+                "AktivaUmlaufvermoegenDetails": {
+                    "type": "object",
+                    "properties": {
+                        "vorraete": {"type": "number", "nullable": True},
+                        "forderungen": {"type": "number", "nullable": True},
+                        "kassenbestand_kreditinstitut": {"type": "number", "nullable": True},
+                    },
+                },
+                "AktivaVorraeteDetails": {
+                    "type": "object",
+                    "properties": {
+                        "fertige_erzeugnisse_waren": {"type": "number", "nullable": True},
+                        "geleistete_anzahlungen": {"type": "number", "nullable": True},
+                        "roh_hilfs_betriebsstoffe": {"type": "number", "nullable": True},
+                        "unfertige_erzeugnisse": {"type": "number", "nullable": True},
+                    },
+                },
+                "Aktiva": {
+                    "type": "object",
+                    "description": "Full assets side of the balance sheet.",
+                    "properties": {
+                        "anlagevermoegen": {"type": "number", "nullable": True},
+                        "anlagevermoegen_details": {
+                            "$ref": "#/components/schemas/AktivaAnlagevermoegenDetails"
+                        },
+                        "umlaufvermoegen": {"type": "number", "nullable": True},
+                        "umlaufvermoegen_details": {
+                            "$ref": "#/components/schemas/AktivaUmlaufvermoegenDetails"
+                        },
+                        "vorraete": {"type": "number", "nullable": True},
+                        "vorraete_details": {
+                            "$ref": "#/components/schemas/AktivaVorraeteDetails"
+                        },
+                        "bilanzsumme": {"type": "number", "nullable": True},
+                    },
+                },
+                "PassivaEigenkapitalDetails": {
+                    "type": "object",
+                    "properties": {
+                        "gezeichnetes_kapital": {"type": "number", "nullable": True},
+                        "gewinnvortrag": {"type": "number", "nullable": True},
+                        "verlustvortrag": {"type": "number", "nullable": True},
+                        "jahresueberschuss": {"type": "number", "nullable": True},
+                        "jahresfehlbetrag": {"type": "number", "nullable": True},
+                        "nicht_gedeckter_fehlbetrag": {"type": "number", "nullable": True},
+                    },
+                },
+                "PassivaRueckstellungenDetails": {
+                    "type": "object",
+                    "properties": {
+                        "steuerrueckstellungen": {"type": "number", "nullable": True},
+                        "sonstige_rueckstellungen": {"type": "number", "nullable": True},
+                        "pensionsrueckstellungen": {"type": "number", "nullable": True},
+                    },
+                },
+                "PassivaVerbindlichkeitenDetails": {
+                    "type": "object",
+                    "properties": {
+                        "lieferungen_leistungen": {"type": "number", "nullable": True},
+                        "gegenueber_gesellschaftern": {"type": "number", "nullable": True},
+                        "gegenueber_kreditinstituten": {"type": "number", "nullable": True},
+                        "gegen_verbundene_unternehmen": {"type": "number", "nullable": True},
+                        "sonstige": {"type": "number", "nullable": True},
+                        "anleihen": {"type": "number", "nullable": True},
+                        "restlaufzeit_bis_1_jahr": {"type": "number", "nullable": True},
+                        "restlaufzeit_mehr_als_1_jahr": {"type": "number", "nullable": True},
+                    },
+                },
+                "Passiva": {
+                    "type": "object",
+                    "description": "Full liabilities + equity side of the balance sheet.",
+                    "properties": {
+                        "eigenkapital": {"type": "number", "nullable": True},
+                        "eigenkapital_details": {
+                            "$ref": "#/components/schemas/PassivaEigenkapitalDetails"
+                        },
+                        "rueckstellungen": {"type": "number", "nullable": True},
+                        "rueckstellungen_details": {
+                            "$ref": "#/components/schemas/PassivaRueckstellungenDetails"
+                        },
+                        "verbindlichkeiten": {"type": "number", "nullable": True},
+                        "verbindlichkeiten_details": {
+                            "$ref": "#/components/schemas/PassivaVerbindlichkeitenDetails"
+                        },
+                        "bilanzsumme": {"type": "number", "nullable": True},
+                    },
+                },
+                "FinancialReport": {
+                    "type": "object",
+                    "description": (
+                        "Full annual filing breakdown: Aktiva, Passiva, "
+                        "Gewinn- und Verlustrechnung (GuV). Sourced from "
+                        "the Bundesanzeiger annual filing."
+                    ),
+                    "properties": {
+                        "year": {"type": "integer"},
+                        "currency": {"type": "string", "example": "EUR"},
+                        "aktiva": {"$ref": "#/components/schemas/Aktiva"},
+                        "passiva": {"$ref": "#/components/schemas/Passiva"},
+                        "guv": {
+                            "type": "object",
+                            "description": (
+                                "Profit & loss statement. Open dict; field set "
+                                "depends on the filing's level of detail."
+                            ),
+                            "additionalProperties": True,
+                        },
+                    },
+                },
+                "FinancialDataResponse": {
+                    "type": "object",
+                    "description": (
+                        "Balance-sheet history attached to a finished report. "
+                        "`financials` is the per-year summary; `financial_reports` "
+                        "is the full Aktiva/Passiva/GuV breakdown when available."
+                    ),
+                    "properties": {
+                        "report_id": {"type": "string"},
+                        "register_type": {"type": "string"},
+                        "register_number": {"type": "string"},
+                        "register_court": {"type": "string"},
+                        "financials": {
+                            "type": "array",
+                            "items": {"$ref": "#/components/schemas/FinancialFeaturesYear"},
+                        },
+                        "financial_reports": {
+                            "type": "array",
+                            "nullable": True,
+                            "items": {"$ref": "#/components/schemas/FinancialReport"},
+                        },
+                        "created_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": True,
+                        },
+                    },
                 },
                 "BranchKey": {
                     "type": "string",
@@ -864,7 +1036,10 @@ def _openapi_spec() -> dict[str, Any]:
             "/api/v1/reports/{report_id}/financial_data": {
                 "get": {
                     "operationId": "getReportFinancialData",
-                    "summary": "Balance-sheet history attached to a finished report.",
+                    "summary": (
+                        "Balance-sheet history attached to a finished report — "
+                        "per-year summary plus full Aktiva/Passiva/GuV breakdown."
+                    ),
                     "parameters": [
                         {
                             "in": "path",
@@ -873,7 +1048,18 @@ def _openapi_spec() -> dict[str, Any]:
                             "schema": {"type": "string"},
                         }
                     ],
-                    "responses": {"200": {"description": "OK"}},
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/FinancialDataResponse"
+                                    }
+                                }
+                            },
+                        }
+                    },
                 }
             },
             "/api/v1/reports/{report_id}/financial_data/analysis": {

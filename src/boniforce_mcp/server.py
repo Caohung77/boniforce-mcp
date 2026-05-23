@@ -74,15 +74,33 @@ def _make_mcp() -> FastMCP:
         instructions=(
             "Tools for the Boniforce credit/financial-data API for German companies.\n\n"
             "STANDARD WORKFLOW (use this in 99% of cases):\n"
+            "  0. **MANDATORY FIRST STEP** — list_reports() to see existing reports for\n"
+            "     this account. Match on company name (case-insensitive, substring OK).\n"
+            "     If a matching report exists with status='completed' AND created_at is\n"
+            "     ≤30 days old, **REUSE that report_id** — skip steps 1-3 entirely and\n"
+            "     jump to step 4 (get_report) or step 5 (financial_data). This costs\n"
+            "     ZERO credits and is instant. Only fall through to steps 1-3 if no\n"
+            "     fresh report exists, the existing one is >30 days old, or status is\n"
+            "     failed/error.\n"
             "  1. search_companies(query) -> get register_type, register_number, register_court.\n"
             "  2. create_report(...) with wait_seconds=40 (default) -> response often already\n"
             "     contains `report` with the finished Boniscore. Check the `done` field.\n"
+            "     ⚠️ COSTS 1 CREDIT per call and takes 30-120s — see step 0 first.\n"
             "  3. If done=false, call get_job_status(job_id, wait_seconds=40). Repeat until\n"
             "     done=true. See LOOP RULE below.\n"
             "  4. When status='completed', call get_report(report_id) (only needed if `report`\n"
-            "     wasn't already inlined by create_report).\n"
+            "     wasn't already inlined by create_report). Free, idempotent.\n"
             "  5. Optional drill-down: get_report_financial_data(report_id) and\n"
-            "     get_report_financial_analysis(report_id).\n\n"
+            "     get_report_financial_analysis(report_id). Free, idempotent.\n\n"
+            "FOLLOW-UP QUESTIONS (same chat, same company):\n"
+            "  If you already have a `report_id` for the company from earlier in this\n"
+            "  conversation, REUSE it for any follow-up score/financial question. Call\n"
+            "  get_report / get_report_financial_data / get_report_financial_analysis\n"
+            "  with that report_id. NEVER call create_report a second time for the same\n"
+            "  company in the same chat — that wastes a credit and gives the same result.\n\n"
+            "NEW CHAT, SAME COMPANY:\n"
+            "  list_reports is account-wide and persists across chats. Step 0 catches this\n"
+            "  case automatically — always run it before considering create_report.\n\n"
             "LOOP RULE — long-running jobs (CRITICAL for ChatGPT Actions):\n"
             "  Boniforce reports take 30-120s. Each tool call long-polls up to 40s server-side\n"
             "  (the upper bound for ChatGPT's per-call HTTP timeout). A 120s report therefore\n"
@@ -196,9 +214,19 @@ def _make_mcp() -> FastMCP:
         }
     )
     async def list_reports() -> Any:
-        """List previously generated reports for the account. Useful to check
-        whether a company already has a finished report (avoids re-running
-        create_report). Returns name, report_id, status, created_at."""
+        """**MANDATORY FIRST STEP** for ANY question about a German company by name.
+
+        Lists previously generated reports for the account (persists across
+        chat sessions). Returns name, report_id, status, created_at.
+
+        Decision rule after calling this:
+          - Match company name (case-insensitive, substring OK).
+          - If a match exists with status='completed' AND created_at is
+            ≤30 days old → REUSE that report_id. Call get_report or
+            get_report_financial_data with it. DO NOT call create_report
+            (which costs 1 credit and takes 30-120s for the same result).
+          - Else (no match, stale >30d, or failed) → proceed with
+            search_companies + create_report."""
         _, token = await _user_token()
         try:
             return await _bf_client_from_state().list_reports(token)
@@ -223,14 +251,21 @@ def _make_mcp() -> FastMCP:
         wait_seconds: int = 40,
     ) -> Any:
         """Step 2 of Boniscore workflow: kick off report generation AND wait
-        server-side for it to finish (default 40s, max 40s). With the default,
-        the response inlines `final_status` and (if completed) the full
-        `report`. Reports take 30-120s, so the response also includes a
-        `done` boolean: if `done` is False, immediately call
-        get_job_status(job_id, wait_seconds=40) and repeat until done=True
-        (typically ≤3 calls total). Never tell the user the job is "still
-        processing" before you have called get_job_status at least 2 more
-        times after this one."""
+        server-side for it to finish (default 40s, max 40s).
+
+        ⚠️ PRECONDITION: call list_reports FIRST. Only call create_report
+        if no completed report for this company exists with created_at
+        within the last 30 days. Each call CHARGES 1 CREDIT and re-runs a
+        30-120s computation that returns the same data. Re-creating for a
+        company that already has a fresh report wastes credits.
+
+        With the default wait_seconds=40, the response inlines `final_status`
+        and (if completed) the full `report`. Reports take 30-120s, so the
+        response also includes a `done` boolean: if `done` is False,
+        immediately call get_job_status(job_id, wait_seconds=40) and repeat
+        until done=True (typically ≤3 calls total). Never tell the user the
+        job is "still processing" before you have called get_job_status at
+        least 2 more times after this one."""
         _, token = await _user_token()
         client = _bf_client_from_state()
         try:
@@ -322,9 +357,18 @@ def _make_mcp() -> FastMCP:
     )
     async def get_report_financial_data(report_id: str) -> Any:
         """Optional drill-down: balance-sheet history for a finished report.
-        Returns yearly Eigenkapital, Verbindlichkeiten, Bilanzsumme, etc.
-        from the Bundesanzeiger filings the score is built on. 404 means
-        no annual filings indexed for the company yet."""
+
+        Returns two parallel views, both sourced from the Bundesanzeiger
+        annual filings the Boniscore is built on:
+          - financials[]: per-year summary metrics (jahr, jahresueberschuss,
+            eigenkapital, verbindlichkeiten, umlaufvermoegen, bilanzsumme,
+            forderungen, liquide_mittel) — fast for charts/trends.
+          - financial_reports[]: full breakdown per year — aktiva (with
+            anlagevermoegen_details, umlaufvermoegen_details, vorraete_details),
+            passiva (with eigenkapital_details, rueckstellungen_details,
+            verbindlichkeiten_details), and guv (P&L; open dict).
+
+        404 means no annual filings indexed for the company yet."""
         _, token = await _user_token()
         try:
             return await _bf_client_from_state().get_report_financial_data(token, report_id)

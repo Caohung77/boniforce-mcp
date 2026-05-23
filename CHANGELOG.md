@@ -4,6 +4,32 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] — 2026-05-23
+
+### Added
+- **Full `FinancialDataResponse` schema in OpenAPI** for
+  `GET /api/v1/reports/{report_id}/financial_data`. New nested schemas
+  `FinancialFeaturesYear`, `FinancialReport`, `Aktiva` (+ details),
+  `Passiva` (+ details). Mirrors the upgraded upstream Boniforce dev API
+  which now returns the full Bundesanzeiger Aktiva/Passiva/GuV breakdown
+  alongside the per-year summary metrics. Pass-through client unchanged.
+- **`get_report_financial_data` MCP tool docstring** expanded to describe
+  both `financials[]` summary and the new `financial_reports[]` deep
+  breakdown.
+
+### Changed
+- **MCP `instructions` block and `list_reports` docstring** promote
+  `list_reports` to **mandatory step 0** for any company question. New
+  rule: if a completed report exists with `created_at` ≤30 days old,
+  reuse its `report_id` and skip `create_report` entirely. Prevents
+  redundant credit charges on cross-session follow-up questions about the
+  same company.
+- **`create_report` docstring** carries an explicit credit-cost warning
+  and a precondition pointing at `list_reports`.
+- **OpenAPI `info.description`** mirrors the same workflow guidance for
+  ChatGPT Custom GPT REST-Action consumers (they don't see MCP
+  `instructions`).
+
 ## [0.4.0] — 2026-05-12
 
 Prepares the server for submission to the Anthropic Connectors Directory.
