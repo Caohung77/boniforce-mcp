@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9] — 2026-05-27
+
+### Security
+- **Starlette bumped to `>=1.0.1`** to pull in the fix for
+  **CVE-2026-48710 ("BadHost")**. The bug let a crafted `Host` header
+  bypass path-based authorization in Starlette's router, and was
+  explicitly called out as impacting MCP servers / FastMCP-style mounts.
+  Boniforce-MCP mounts the bearer-gated `/mcp` app inside an outer
+  Starlette that also serves public OAuth metadata, which is the exact
+  pattern exploited — so this is a HIGH-severity upgrade.
+- **`TrustedHostMiddleware` allowlist tightened.** `localhost`,
+  `127.0.0.1`, and `testserver` are no longer permanently whitelisted in
+  production. They are only re-enabled when the issuer hostname is
+  `localhost`/`127.0.0.1` (dev) or when `BF_ALLOW_TEST_HOSTS=1` is
+  explicitly set. Defense-in-depth against future Host-header tricks
+  along the lines of BadHost.
+
 ## [0.4.8] — 2026-05-23
 
 ### Added

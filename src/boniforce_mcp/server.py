@@ -682,9 +682,15 @@ def _allowed_hosts() -> list[str]:
     extra = os.environ.get("BF_EXTRA_ALLOWED_HOSTS", "")
     extras = [h.strip() for h in extra.split(",") if h.strip()]
     base = [host] if host else []
-    # localhost / 127.0.0.1 always allowed so health checks and local dev
-    # don't break behind the reverse proxy.
-    return base + extras + ["localhost", "127.0.0.1", "testserver"]
+    # Test/loopback hosts only enabled in dev (issuer points at localhost) or
+    # when explicitly opted in via BF_ALLOW_TEST_HOSTS=1. Keeps "testserver"
+    # and bare "localhost" out of the production allowlist where the Host
+    # header is fully attacker-controlled.
+    dev_issuer = host in ("localhost", "127.0.0.1")
+    opt_in = os.environ.get("BF_ALLOW_TEST_HOSTS", "").lower() in ("1", "true", "yes")
+    if dev_issuer or opt_in:
+        return base + extras + ["localhost", "127.0.0.1", "testserver"]
+    return base + extras
 
 
 def _public_dir() -> Path | None:
