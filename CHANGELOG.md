@@ -4,6 +4,35 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-08-13
+
+### Added
+- Add `get_credit_intelligence`, which fetches company, financial, ratio, and
+  matched sector data concurrently for faster decision-ready credit briefs.
+- Add production-aligned WZ-to-SectorBench mapping guidance and packaged skill
+  reference files for sector matching and output presentation.
+
+### Fixed
+- Make the skill warn users once, immediately before creating a new report,
+  that generation can take up to 120 seconds. Reused reports remain silent.
+- Remove process narration and unsolicited missing-section explanations from
+  final briefs; unavailable optional sector/financial sections are now omitted.
+- Add privacy-safe upstream operation timing logs, excluding tokens, report IDs,
+  job IDs, company names, and request payloads.
+
+### Changed
+- Upgrade the bundled Boniforce skill to **Credit Intelligence 0.3.1**. A
+  company check now gathers the Boniscore, company details, financial history,
+  and ratios, then maps the company to SectorBench with explicit
+  verified/inferred/unavailable confidence.
+- Add a company-versus-sector relationship model covering aligned strength,
+  resilience amid sector headwinds, company-specific weakness, compounded
+  risk, and mixed evidence. The skill explicitly forbids averaging the two
+  unrelated score methodologies.
+- Add a reusable Markdown decision-brief format with score bars, financial and
+  sector trend tables, Unicode sparklines, freshness labels, and an optional
+  Mermaid relationship diagram.
+
 ## [0.5.0] — 2026-08-13
 
 ### Added
@@ -244,6 +273,7 @@ No breaking API changes.
 - Pytest suite (10 tests) covering httpx client, full OAuth 2.1 PKCE +
   DCR + refresh, JWKS shape, and REST endpoints.
 
+[0.6.0]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.6.0
 [0.5.0]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.5.0
 [0.3.1]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.3.0

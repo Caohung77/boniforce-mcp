@@ -9,7 +9,9 @@ Composition:
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
@@ -56,6 +58,94 @@ def _sectorbench_client_from_state() -> SectorbenchClient:
 _client_holder: dict[str, Any] = {}
 
 
+_SECTORBENCH_WZ_CORE: tuple[tuple[str, set[int]], ...] = (
+    ("automotive", {29}),
+    ("healthcare", {86, 87, 88}),
+    ("construction", {41, 42, 43}),
+    ("renewable_energy", {35}),
+    ("logistics", {49, 50, 51, 52, 53}),
+    ("fintech", {64, 65, 66}),
+    ("it_services", {62, 63}),
+    ("retail", {47}),
+    ("hospitality", {55, 56}),
+)
+_SECTORBENCH_WZ_BROAD = {30: "automotive", 21: "healthcare", 61: "it_services"}
+_INDUSTRY_CODE_KEYS = {
+    "industry_code",
+    "industry_codes",
+    "primary_industry_code",
+    "wz",
+    "wz_code",
+    "wz_codes",
+}
+
+
+def _industry_code_values(value: Any, *, under_code_key: bool = False) -> list[str]:
+    """Collect industry-code strings without mistaking register numbers for WZ codes."""
+    if isinstance(value, dict):
+        found: list[str] = []
+        for key, nested in value.items():
+            key_l = str(key).lower()
+            if under_code_key and key_l in {"system", "scheme", "source", "label", "name"}:
+                continue
+            is_code_key = under_code_key or key_l in _INDUSTRY_CODE_KEYS or key_l.startswith("wz")
+            found.extend(_industry_code_values(nested, under_code_key=is_code_key))
+        return found
+    if isinstance(value, list):
+        found = []
+        for nested in value:
+            found.extend(_industry_code_values(nested, under_code_key=under_code_key))
+        return found
+    if under_code_key and isinstance(value, (str, int, float)):
+        return [str(value)]
+    return []
+
+
+def _wz_division(value: str) -> int | None:
+    text = value.strip().upper()
+    match = re.fullmatch(
+        r"(?:WZ(?:08|2025)?[- :]*|[A-Z])?(\d{2})(?:[.\-/]\d+)?",
+        text,
+    )
+    if not match:
+        return None
+    division = int(match.group(1))
+    return division if 1 <= division <= 99 else None
+
+
+def _match_sectorbench_wz(*payloads: Any) -> dict[str, Any] | None:
+    """Map the first explicit WZ/industry code to SectorBench's coverage."""
+    for payload in payloads:
+        for raw_code in _industry_code_values(payload):
+            division = _wz_division(raw_code)
+            if division is None:
+                continue
+            for branch_key, divisions in _SECTORBENCH_WZ_CORE:
+                if division in divisions:
+                    return {
+                        "status": "verified",
+                        "confidence": "high",
+                        "branch_key": branch_key,
+                        "evidence": f"WZ {raw_code}",
+                    }
+            broad = _SECTORBENCH_WZ_BROAD.get(division)
+            if broad:
+                return {
+                    "status": "verified",
+                    "confidence": "medium",
+                    "branch_key": broad,
+                    "evidence": f"WZ {raw_code} (broad coverage)",
+                }
+            if 10 <= division <= 33:
+                return {
+                    "status": "verified",
+                    "confidence": "high",
+                    "branch_key": "manufacturing",
+                    "evidence": f"WZ {raw_code}",
+                }
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: Starlette):
     await storage.init_db()
@@ -91,8 +181,10 @@ def _make_mcp() -> FastMCP:
             "     done=true. See LOOP RULE below.\n"
             "  4. When status='completed', call get_report(report_id) (only needed if `report`\n"
             "     wasn't already inlined by create_report). Free, idempotent.\n"
-            "  5. Optional drill-down: get_report_financial_data(report_id) and\n"
-            "     get_report_financial_analysis(report_id). Free, idempotent.\n\n"
+            "  5. For a professional decision brief, call get_credit_intelligence(report_id)\n"
+            "     ONCE. It fetches report, company details, financials, analysis, and matched\n"
+            "     Sectorbench context concurrently. Do not call those enrichment tools\n"
+            "     separately unless the aggregate tool reports a missing layer.\n\n"
             "FOLLOW-UP QUESTIONS (same chat, same company):\n"
             "  If you already have a `report_id` for the company from earlier in this\n"
             "  conversation, REUSE it for any follow-up score/financial question. Call\n"
@@ -584,6 +676,111 @@ def _make_mcp() -> FastMCP:
             return await _bf_client_from_state().get_company_holdings(token, report_id)
         except BoniforceError as e:
             raise _wrap(e)
+
+    async def _capture_read(awaitable: Any) -> tuple[Any | None, dict[str, Any] | None]:
+        """Capture one optional enrichment layer without failing the whole brief."""
+        try:
+            return await awaitable, None
+        except BoniforceError as exc:
+            return None, {"status": exc.status, "detail": exc.body}
+        except Exception as exc:
+            return None, {"status": 502, "detail": str(exc)}
+
+    @mcp.tool(
+        annotations={
+            "title": "Complete company credit intelligence",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
+    async def get_credit_intelligence(
+        report_id: str,
+        branch_key: str | None = None,
+        include_sector: bool = True,
+        include_news: bool = False,
+    ) -> Any:
+        """Fetch a decision-ready company evidence pack in one optimized call.
+
+        Retrieves the report, company details, financial statements, and ratio
+        analysis concurrently. When an explicit WZ code identifies a covered
+        Sectorbench branch (or branch_key is supplied), also retrieves the
+        current sector score, 12-month score trend, and insolvency trend in
+        parallel. Set include_news only for a requested sector briefing.
+
+        Prefer this tool after a report_id is available instead of calling each
+        enrichment tool separately. Individual unavailable layers are returned
+        under errors while the remaining evidence is preserved.
+        """
+        _, token = await _user_token()
+        if branch_key is not None:
+            _validate_branch(branch_key)
+
+        client = _bf_client_from_state()
+        labels = ("report", "company_details", "financial_data", "financial_analysis")
+        captured = await asyncio.gather(
+            _capture_read(client.get_report(token, report_id)),
+            _capture_read(client.get_company_details(token, report_id)),
+            _capture_read(client.get_report_financial_data(token, report_id)),
+            _capture_read(client.get_report_financial_analysis(token, report_id)),
+        )
+        bundle: dict[str, Any] = {"report_id": report_id, "errors": {}}
+        for label, (data, error) in zip(labels, captured):
+            if data is not None:
+                bundle[label] = data
+            if error is not None:
+                bundle["errors"][label] = error
+
+        sector_match: dict[str, Any] | None
+        if branch_key is not None:
+            sector_match = {
+                "status": "inferred",
+                "confidence": "medium",
+                "branch_key": branch_key,
+                "evidence": "branch_key supplied by caller",
+            }
+        else:
+            sector_match = _match_sectorbench_wz(
+                bundle.get("company_details"), bundle.get("report")
+            )
+        bundle["sector_match"] = sector_match or {
+            "status": "unavailable",
+            "confidence": "none",
+        }
+
+        if include_sector and sector_match:
+            matched_key = sector_match["branch_key"]
+            sector_labels = ["current", "history", "insolvency_history"]
+            sector_calls = [
+                _capture_read(_sectorbench_client_from_state().get_branch(matched_key)),
+                _capture_read(
+                    _sectorbench_client_from_state().get_branch_history(matched_key, 12)
+                ),
+                _capture_read(
+                    _sectorbench_client_from_state().get_branch_insolvency_history(
+                        matched_key, 12
+                    )
+                ),
+            ]
+            if include_news:
+                sector_labels.append("news")
+                sector_calls.append(
+                    _capture_read(
+                        _sectorbench_client_from_state().get_branch_news(matched_key)
+                    )
+                )
+            sector_captured = await asyncio.gather(*sector_calls)
+            bundle["sector"] = {}
+            for label, (data, error) in zip(sector_labels, sector_captured):
+                if data is not None:
+                    bundle["sector"][label] = data
+                if error is not None:
+                    bundle["errors"][f"sector.{label}"] = error
+
+        if not bundle["errors"]:
+            bundle.pop("errors")
+        return bundle
 
     # ---- Sectorbench branch-data tools ----
     #

@@ -2,7 +2,23 @@ import httpx
 import pytest
 import respx
 
-from boniforce_mcp.boniforce_client import BoniforceClient, BoniforceError
+from boniforce_mcp.boniforce_client import (
+    BoniforceClient,
+    BoniforceError,
+    _operation_name,
+)
+
+
+def test_operation_names_do_not_expose_resource_ids():
+    assert _operation_name("GET", "/v1/reports/report-secret") == "get_report"
+    assert (
+        _operation_name("GET", "/v1/jobs/job-secret/status")
+        == "get_job_status"
+    )
+    assert (
+        _operation_name("GET", "/v1/company/report-secret/details")
+        == "get_company_details"
+    )
 
 
 @pytest.mark.asyncio

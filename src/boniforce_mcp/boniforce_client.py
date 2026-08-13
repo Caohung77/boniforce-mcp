@@ -1,3 +1,6 @@
+import logging
+import re
+import time
 from typing import Any
 
 import httpx
@@ -11,6 +14,9 @@ from tenacity import (
 from .config import get_settings
 
 
+logger = logging.getLogger(__name__)
+
+
 class BoniforceError(RuntimeError):
     def __init__(self, status: int, body: Any):
         super().__init__(f"Boniforce API error {status}: {body}")
@@ -19,6 +25,34 @@ class BoniforceError(RuntimeError):
 
 
 _RETRYABLE = retry_if_exception_type((httpx.TransportError, httpx.ReadTimeout))
+
+
+def _operation_name(method: str, path: str) -> str:
+    """Return a stable endpoint name without logging report/job identifiers."""
+    exact = {
+        ("GET", "/v1/search"): "search_companies",
+        ("GET", "/v1/search/advanced"): "search_companies_advanced",
+        ("GET", "/v1/reports"): "list_reports",
+        ("POST", "/v1/reports"): "create_report",
+        ("GET", "/v1/financial_data"): "get_financial_data",
+        ("GET", "/v1/financial_data/analysis"): "get_financial_analysis",
+    }
+    known = exact.get((method.upper(), path))
+    if known:
+        return known
+    patterns = (
+        (r"^/v1/jobs/[^/]+/status$", "get_job_status"),
+        (r"^/v1/reports/[^/]+/financial_data/analysis$", "get_report_financial_analysis"),
+        (r"^/v1/reports/[^/]+/financial_data$", "get_report_financial_data"),
+        (r"^/v1/reports/[^/]+$", "get_report"),
+        (r"^/v1/company/[^/]+/details$", "get_company_details"),
+        (r"^/v1/company/[^/]+/shareholders$", "get_company_shareholders"),
+        (r"^/v1/company/[^/]+/holdings$", "get_company_holdings"),
+    )
+    for pattern, name in patterns:
+        if re.match(pattern, path):
+            return name
+    return "unknown"
 
 
 class BoniforceClient:
@@ -36,7 +70,23 @@ class BoniforceClient:
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = f"Bearer {token}"
         headers.setdefault("Accept", "application/json")
-        resp = await self._client.request(method, path, headers=headers, **kwargs)
+        started = time.monotonic()
+        operation = _operation_name(method, path)
+        try:
+            resp = await self._client.request(method, path, headers=headers, **kwargs)
+        except Exception:
+            logger.exception(
+                "boniforce_upstream operation=%s duration_ms=%.1f",
+                operation,
+                (time.monotonic() - started) * 1000,
+            )
+            raise
+        logger.info(
+            "boniforce_upstream operation=%s status=%s duration_ms=%.1f",
+            operation,
+            resp.status_code,
+            (time.monotonic() - started) * 1000,
+        )
         if resp.status_code >= 400:
             try:
                 body = resp.json()

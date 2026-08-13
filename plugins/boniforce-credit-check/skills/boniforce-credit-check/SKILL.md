@@ -1,77 +1,90 @@
 ---
 name: boniforce-credit-check
-description: Use Boniforce automatically for requests about a German company's Boniscore, creditworthiness, Bonität, Kreditlimit, payment risk, APPROVE/REVIEW/DECLINE assessment, balance-sheet history, financial analysis, representatives, shareholders, or holdings. Trigger on phrases such as "Boniscore", "Boniforce", "Bonitätsprüfung", "check this German company", and "can I extend credit to this company". Do not use for private individuals, non-German companies, generic financial education, or sector-only questions.
+description: >-
+  Use Boniforce automatically for sophisticated German-company credit intelligence:
+  Boniscore, creditworthiness, Bonität, credit limit, APPROVE/REVIEW/DECLINE
+  assessment, financial and balance-sheet trends, company details, ownership,
+  and SectorBench industry context. Trigger on requests to check, score, compare,
+  explain, or visualize a German company's risk, including phrases such as
+  "Boniscore", "Boniforce", "Bonitätsprüfung", "check this German company",
+  "can I extend credit", "financial health", or "compare it with its sector".
+  Do not use for private individuals, non-German companies, generic financial
+  education, or sector-only questions.
 ---
 
-# Boniforce Credit Check
+# Boniforce Credit Intelligence
 
-Use the Boniforce MCP tools to retrieve live German company credit data. Never estimate, invent, or web-search a Boniscore.
+Use the Boniforce MCP tools to produce evidence-based, decision-ready company briefs. Never estimate, invent, or web-search a Boniscore.
 
-## Availability and authentication
+## Availability and authorization
 
-1. Confirm that tools from the `boniforce` MCP server are available.
-2. If unavailable, tell the user to connect `https://mcp.boniforce.de/mcp` using OAuth and retry in a new conversation.
-3. Never ask the user to paste a Boniforce API key into the conversation. Authentication belongs in the OAuth connection screen.
+1. Confirm that tools from the `boniforce` MCP server are available. If unavailable, tell the user to connect `https://mcp.boniforce.de/mcp` using OAuth and retry in a new conversation.
+2. Never request a Boniforce API key in chat. Authentication belongs in the OAuth screen.
+3. Treat an explicit request to get, check, calculate, create, run, or show a current Boniscore as authorization for spending 75 Boniforce credits only when no reusable report exists.
+4. Ask before creating a report when the request is only informational or ambiguous. Never create the same report twice.
 
-## Authorization rule
+## Core workflow
 
-- Treat an explicit request to **get, check, calculate, create, run, or show** a current Boniscore as authorization to perform the workflow below, including spending 75 Boniforce credits only when a reusable report does not exist.
-- Do not create a report when the user is merely asking how Boniforce or Boniscore works.
-- Ask for confirmation before creating a report if the request is ambiguous about whether the user wants a live check.
-- Never create a second report for the same company when a suitable recent report or a report ID from the conversation is available.
+### 1. Reuse before spending
 
-## Boniscore workflow
+- Reuse a `report_id` already established for the company in the conversation.
+- Otherwise call `list_reports` before searching or creating. Reuse a case-insensitive company match when it is completed and no more than 30 days old.
+- If no reusable report exists, call `search_companies`; use `search_companies_advanced` only if needed. Resolve ambiguous matches with legal name, city, register type, number, and court.
+- Do not spend 75 credits until the company is unambiguous.
 
-Follow this sequence exactly.
+### 2. Complete the report
 
-### 1. Reuse known context
+- Immediately before calling `create_report`, send exactly one concise user-facing status update in the user's language. In German use: `Ich erstelle den aktuellen Bericht. Die Verarbeitung kann bis zu 120 Sekunden dauern.` Do not mention tools, workflow steps, polling, or internal processing. Do not send this notice when reusing an existing report.
+- Call `create_report` once using `search_result_id` when available and `wait_seconds=40`.
+- If `done=false`, call `get_job_status` with the same `job_id` and `wait_seconds=40`, up to two more times in the same turn.
+- Use the inlined report when available; otherwise call `get_report` after completion. Never start a replacement report because polling is slow.
 
-- If the conversation already contains a `report_id` for the requested company, call `get_report` with it.
-- Otherwise, call `list_reports` before any company search or report creation.
-- Match company names case-insensitively. If a completed matching report is no more than 30 days old, reuse its `report_id` with `get_report`. This is free and immediate.
-- Treat failed, incomplete, or older reports as non-reusable.
+### 3. Build the full evidence pack
 
-### 2. Identify the company
+Once a `report_id` is available, call `get_credit_intelligence(report_id)` exactly once. This optimized tool retrieves the report, company details, financial statements, ratio analysis, and any exact WZ-matched SectorBench context concurrently.
 
-- If no reusable report exists, call `search_companies` with the company name. Use `search_companies_advanced` only when normal search returns no suitable match.
-- Use register court, register type, register number, city, and legal name supplied by the user to select the exact result.
-- If several plausible matches remain, show a concise numbered list and ask the user to choose. Do not spend 75 credits until the company is unambiguous.
-- If there is one clear match, continue without unnecessary confirmation.
+- Do not call `get_report`, `get_company_details`, `get_report_financial_data`, or `get_report_financial_analysis` separately when the aggregate tool returned that layer.
+- Fall back to separate calls only if `get_credit_intelligence` is unavailable or its `errors` object marks a required layer unavailable.
+- Keep `include_news=false` by default. Set it to true only when the user requests current sector news or a briefing.
 
-### 3. Create and finish a report
+A 404 from either financial tool means that an indexed Bundesanzeiger filing is unavailable. Continue with the Boniscore and clearly mark the missing layer.
 
-- Call `create_report` once with the selected company's `search_result_id` (preferred), or its complete register fields, and `wait_seconds=40`.
-- Inspect `done` after the call. If `done=false`, call `get_job_status` immediately with the same `job_id` and `wait_seconds=40`.
-- If it remains incomplete, call `get_job_status` once more. Keep all polling in the same user turn.
-- When completed, use the inlined report when present; otherwise call `get_report` with the returned `report_id`.
-- After the create call plus two status calls, report an unusual delay instead of creating another report.
+Do not call ownership tools by default. Call `get_company_shareholders` or `get_company_holdings` only on request and warn that an uncached refresh costs 25 credits. Use direct `get_financial_data` (25 credits) or `get_financial_analysis` (50 credits) only when the user explicitly wants financials without a full report.
 
-### 4. Answer clearly
+### 4. Match and retrieve sector context
 
-Return the available:
+Read [references/sector-context.md](references/sector-context.md) and follow its evidence hierarchy and WZ mapping.
 
-- exact legal company name and register identity;
-- Boniscore from 0–100, explaining that higher is better;
-- score label or risk class;
-- recommended credit limit;
-- APPROVE, REVIEW, or DECLINE assessment;
-- report date and whether an existing report was reused or a new one was created.
+- Prefer the aggregate tool's `sector_match`, which uses explicit WZ/industry codes from company details or the report.
+- Label the match as `verified`, `inferred`, or `unavailable`; always show the evidence and confidence.
+- If `sector_match` is unavailable but the returned business purpose clearly supports one branch, infer it using the reference and retrieve only `get_branch`, `get_branch_history(months=12)`, and `get_branch_insolvency_history(months=12)` in one parallel batch.
+- Use `list_branch_indicators` plus selected indicator histories only when they explain a material company risk or the user asks for a deeper driver analysis.
+- If no defensible match exists, omit the sector section instead of guessing. Mention the absence only when the user explicitly requested a sector comparison.
 
-Mention that the result is decision support, not a guarantee. Do not expose access tokens, API keys, internal authentication data, or raw secrets.
+### 5. Analyze the relationship
 
-## Follow-up questions
+- Separate company facts from sector facts and interpretation.
+- Compare direction and risk labels, not merely the two numeric scores.
+- Classify the relationship as aligned strength, company resilience amid sector headwinds, company-specific weakness, compounded risk, or mixed/unclear.
+- Explain the conclusion with two to four concrete drivers, such as profitability, equity, leverage, liquidity, sector score momentum, sector dimensions, and insolvency direction.
+- Never average the Boniscore and SectorBench score or invent an adjusted/blended score. They measure different entities and methodologies.
+- Base the credit recommendation on the returned Boniforce assessment and credit limit; use SectorBench as context, not as an undocumented override.
 
-- Reuse the same `report_id` for follow-up questions about the company.
-- Use `get_report_financial_data` for annual figures and balance-sheet history.
-- Use `get_report_financial_analysis` for derived ratios and interpretation.
-- Use `get_company_details` for address, firmographics, and representatives.
-- Call `get_company_shareholders` or `get_company_holdings` only when the user explicitly requests ownership data. Warn that a stale or missing cache refresh costs 25 credits; a fresh cached response is free.
-- Use the direct `get_financial_data` (25 credits) or `get_financial_analysis` (50 credits) tools only when the user explicitly wants financial data without a full Boniscore report.
-- Explain a 404 from either financial-detail tool as unavailable Bundesanzeiger filing data; the Boniscore itself can still be valid.
+## Output
+
+Read [references/output-format.md](references/output-format.md) and use the decision-brief template by default.
+
+- Lead with the decision, Boniscore, credit limit, sector score, and relationship in one compact summary.
+- Show financial and sector time series with compact Unicode bars/sparklines derived only from actual values. Use a Mermaid diagram only when the client renders Mermaid and it clarifies the relationship.
+- Include exact fiscal years, currencies, units, report date, SectorBench `fetched_at`, match confidence, and missing-data caveats.
+- Use `n/a` for unavailable values. Do not convert missing data to zero.
+- Keep the first screen concise, then provide evidence tables and a short monitoring section.
+- Present the professional result directly. Do not narrate which tools ran, which optional sections were skipped, or what else the user could ask to see.
+- Match the user's language. Explain that the result is decision support, not a guarantee.
 
 ## Failure handling
 
-- Authentication failure: ask the user to reconnect Boniforce through OAuth; do not request their API key in chat.
-- No company match: ask for the legal name, register court, or register number.
-- Insufficient Boniforce credits: state that no new report was created and direct the user to their Boniforce account.
-- Tool or server failure: report the error plainly and never substitute an invented score.
+- Authentication failure: ask the user to reconnect through OAuth; never request an API key in chat.
+- No company match: ask for legal name, register court, or register number.
+- Insufficient credits: state that no new report was created and direct the user to their Boniforce account.
+- Tool/server failure: report the unavailable layer plainly and never substitute invented data.

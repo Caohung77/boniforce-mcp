@@ -68,10 +68,11 @@ https://mcp.boniforce.de/mcp
 
 ### Install the public Boniforce skill or plugin
 
-The **Boniforce Credit Check** skill makes Boniscore prompts trigger the
-correct workflow automatically: reuse a recent report first, identify the
-company, create at most one new report when authorized, poll it to completion,
-and return the score, credit limit, and risk assessment.
+The **Boniforce Credit Intelligence** skill makes company-risk prompts trigger
+the full workflow automatically: reuse a recent report, retrieve financial
+history and ratios, map the company to a SectorBench branch with explicit match
+confidence, compare company and sector risk, and return a visual Markdown
+decision brief. It never invents a blended company/sector score.
 
 **Recommended — install the plugin.** It bundles the skill with the hosted MCP
 connection and OAuth setup:
@@ -88,11 +89,11 @@ Then start a new conversation and ask:
 The plugin package is in
 [`plugins/boniforce-credit-check`](plugins/boniforce-credit-check), and a
 ready-to-upload archive is available as
-[`releases/boniforce-credit-check-plugin-0.2.0.zip`](releases/boniforce-credit-check-plugin-0.2.0.zip).
+[`releases/boniforce-credit-check-plugin-0.3.1.zip`](releases/boniforce-credit-check-plugin-0.3.1.zip).
 
 **Standalone skill.** Users who already connected the Boniforce MCP can
 download
-[`releases/boniforce-credit-check-skill-0.2.0.zip`](releases/boniforce-credit-check-skill-0.2.0.zip)
+[`releases/boniforce-credit-check-skill-0.3.1.zip`](releases/boniforce-credit-check-skill-0.3.1.zip)
 and extract the `boniforce-credit-check` folder into
 `$HOME/.agents/skills/`. Restart Codex if the skill does not appear.
 
@@ -322,6 +323,7 @@ the OAuth flow):
 | `get_financial_analysis`          | `GET /v1/financial_data/analysis`                               |
 | `get_report_financial_data`       | `GET /v1/reports/{report_id}/financial_data`                    |
 | `get_report_financial_analysis`   | `GET /v1/reports/{report_id}/financial_data/analysis`           |
+| `get_credit_intelligence`         | Concurrent report, company, finance, and sector aggregation     |
 | `get_company_details`             | `GET /v1/company/{report_id}/details`                           |
 | `get_company_shareholders`        | `GET /v1/company/{report_id}/shareholders`                      |
 | `get_company_holdings`            | `GET /v1/company/{report_id}/holdings`                          |
