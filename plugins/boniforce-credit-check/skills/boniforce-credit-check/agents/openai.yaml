@@ -1,0 +1,15 @@
+interface:
+  display_name: "Boniforce Credit Check"
+  short_description: "Get Boniscores for German companies"
+  default_prompt: "Use $boniforce-credit-check to get the current Boniscore for a German company."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "boniforce"
+      description: "Live Boniscores and financial data for German companies"
+      transport: "streamable_http"
+      url: "https://mcp.boniforce.de/mcp"
+
+policy:
+  allow_implicit_invocation: true

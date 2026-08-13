@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "boniforce": {
+      "type": "http",
+      "url": "https://mcp.boniforce.de/mcp",
+      "auth": "oauth"
+    }
+  }
+}

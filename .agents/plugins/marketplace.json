@@ -1,0 +1,20 @@
+{
+  "name": "boniforce",
+  "interface": {
+    "displayName": "Boniforce"
+  },
+  "plugins": [
+    {
+      "name": "boniforce-credit-check",
+      "source": {
+        "source": "local",
+        "path": "./plugins/boniforce-credit-check"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Business"
+    }
+  ]
+}

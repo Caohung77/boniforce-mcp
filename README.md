@@ -63,6 +63,41 @@ The Boniforce-hosted server is at:
 https://mcp.boniforce.de/mcp
 ```
 
+### Install the public Boniforce skill or plugin
+
+The **Boniforce Credit Check** skill makes Boniscore prompts trigger the
+correct workflow automatically: reuse a recent report first, identify the
+company, create at most one new report when authorized, poll it to completion,
+and return the score, credit limit, and risk assessment.
+
+**Recommended — install the plugin.** It bundles the skill with the hosted MCP
+connection and OAuth setup:
+
+```bash
+codex plugin marketplace add Caohung77/boniforce-mcp
+codex plugin add boniforce-credit-check@boniforce
+```
+
+Then start a new conversation and ask:
+
+> *"Get the current Boniscore for Boniforce GmbH."*
+
+The plugin package is in
+[`plugins/boniforce-credit-check`](plugins/boniforce-credit-check), and a
+ready-to-upload archive is available as
+[`releases/boniforce-credit-check-plugin-0.1.0.zip`](releases/boniforce-credit-check-plugin-0.1.0.zip).
+
+**Standalone skill.** Users who already connected the Boniforce MCP can
+download
+[`releases/boniforce-credit-check-skill-0.1.0.zip`](releases/boniforce-credit-check-skill-0.1.0.zip)
+and extract the `boniforce-credit-check` folder into
+`$HOME/.agents/skills/`. Restart Codex if the skill does not appear.
+
+For ChatGPT web distribution, submit the plugin archive through OpenAI's
+plugin submission flow as **With MCP**, using
+`https://mcp.boniforce.de/mcp`. A downloadable ZIP alone does not publish a
+plugin to ChatGPT's universal directory.
+
 ### Add to Claude (Claude.ai web or Claude Desktop)
 
 1. Open **Settings → Connectors → Add custom connector**.

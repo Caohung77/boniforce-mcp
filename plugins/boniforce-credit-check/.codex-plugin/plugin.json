@@ -1,0 +1,40 @@
+{
+  "name": "boniforce-credit-check",
+  "version": "0.1.0",
+  "description": "Get live Boniscores and credit assessments for German companies.",
+  "author": {
+    "name": "Boniforce",
+    "url": "https://boniforce.de"
+  },
+  "homepage": "https://boniforce.de",
+  "repository": "https://github.com/Caohung77/boniforce-mcp",
+  "license": "MIT",
+  "keywords": [
+    "boniforce",
+    "boniscore",
+    "credit-check",
+    "germany",
+    "financial-analysis"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Boniforce Credit Check",
+    "shortDescription": "Live German company credit checks",
+    "longDescription": "Automatically use Boniforce for German company Boniscores, credit-limit recommendations, risk assessments, balance-sheet history, and financial analysis. The workflow reuses recent reports before spending a credit and authenticates every user through Boniforce OAuth.",
+    "developerName": "Boniforce",
+    "category": "Business",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://boniforce.de",
+    "privacyPolicyURL": "https://boniforce.de/datenschutz",
+    "defaultPrompt": [
+      "Get the current Boniscore for this German company.",
+      "Check this company's credit limit and risk assessment.",
+      "Analyze this company's balance-sheet history."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}
