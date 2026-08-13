@@ -1,6 +1,6 @@
 {
   "name": "boniforce-credit-check",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Get live Boniscores and credit assessments for German companies.",
   "author": {
     "name": "Boniforce",
@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "Boniforce Credit Check",
     "shortDescription": "Live German company credit checks",
-    "longDescription": "Automatically use Boniforce for German company Boniscores, credit-limit recommendations, risk assessments, balance-sheet history, and financial analysis. The workflow reuses recent reports before spending a credit and authenticates every user through Boniforce OAuth.",
+    "longDescription": "Automatically use Boniforce for German company Boniscores, credit-limit recommendations, risk assessments, ownership data, balance-sheet history, and financial analysis. The workflow reuses recent reports before spending 75 credits and authenticates every user through Boniforce OAuth.",
     "developerName": "Boniforce",
     "category": "Business",
     "capabilities": [

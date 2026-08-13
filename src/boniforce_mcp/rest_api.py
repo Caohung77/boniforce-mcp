@@ -2,7 +2,7 @@
 REST mirror of the MCP tools for ChatGPT Custom GPT "Actions".
 
 The Custom GPT Actions feature speaks OpenAPI 3.1 + REST, not MCP. This
-module exposes the same 7 Boniforce operations as JSON REST endpoints under
+module exposes the current Boniforce operations as JSON REST endpoints under
 ``/api/v1/*`` and serves an OpenAPI spec at ``/api/openapi.json``.
 
 Auth: same JWT bearer that protects /mcp. Each request's user is read from
@@ -157,6 +157,42 @@ def _parse_months(request: Request, *, default: int = 12, maximum: int = 36) -> 
     return n
 
 
+COMPANY_IDENTIFIER_FIELDS = (
+    "company_name",
+    "register_type",
+    "register_number",
+    "register_court",
+    "search_result_id",
+    "session_id",
+)
+
+
+def _validate_company_identifier(values: dict[str, Any]) -> None:
+    if values.get("search_result_id"):
+        return
+    missing = [
+        field
+        for field in ("register_type", "register_number", "register_court")
+        if not values.get(field)
+    ]
+    if missing:
+        raise HTTPError(
+            400,
+            "Provide search_result_id or all register fields. Missing: "
+            + ", ".join(missing),
+        )
+
+
+def _company_query_params(request: Request) -> dict[str, str]:
+    params = {
+        field: request.query_params[field]
+        for field in COMPANY_IDENTIFIER_FIELDS
+        if request.query_params.get(field) is not None
+    }
+    _validate_company_identifier(params)
+    return params
+
+
 # ---------------- job-status helpers (shared with MCP server.py) ----------------
 
 TERMINAL_JOB_STATUSES = frozenset({"completed", "finished", "failed", "error"})
@@ -205,6 +241,21 @@ async def search_companies(request: Request) -> Response:
     return JSONResponse(data)
 
 
+async def search_companies_advanced(request: Request) -> Response:
+    try:
+        _, token = await _authenticate(request)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    query = request.query_params.get("query")
+    if not query:
+        return _err(400, "Missing required query parameter: query.")
+    try:
+        data = await _client_holder().search_companies_advanced(token, query)
+    except Exception as exc:
+        return _err(502, f"Boniforce upstream: {exc}")
+    return JSONResponse(data)
+
+
 async def list_reports(request: Request) -> Response:
     try:
         _, token = await _authenticate(request)
@@ -226,17 +277,18 @@ async def create_report(request: Request) -> Response:
         body = await request.json()
     except Exception:
         return _err(400, "Body must be valid JSON.")
-    required = ("company_name", "register_type", "register_number", "register_court")
-    missing = [k for k in required if not body.get(k)]
-    if missing:
-        return _err(400, f"Missing fields: {', '.join(missing)}")
+    try:
+        _validate_company_identifier(body)
+    except HTTPError as e:
+        return _err(e.status, e.message)
     try:
         data = await _client_holder().create_report(
             token,
-            company_name=body["company_name"],
-            register_type=body["register_type"],
-            register_number=body["register_number"],
-            register_court=body["register_court"],
+            company_name=body.get("company_name"),
+            register_type=body.get("register_type"),
+            register_number=body.get("register_number"),
+            register_court=body.get("register_court"),
+            search_result_id=body.get("search_result_id"),
             session_id=body.get("session_id"),
         )
     except Exception as exc:
@@ -318,6 +370,74 @@ async def get_report_financial_analysis(request: Request) -> Response:
     report_id = request.path_params["report_id"]
     try:
         data = await _client_holder().get_report_financial_analysis(token, report_id)
+    except Exception as exc:
+        return _err(502, f"Boniforce upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def get_financial_data(request: Request) -> Response:
+    try:
+        _, token = await _authenticate(request)
+        params = _company_query_params(request)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _client_holder().get_financial_data(token, **params)
+    except Exception as exc:
+        return _err(502, f"Boniforce upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def get_financial_analysis(request: Request) -> Response:
+    try:
+        _, token = await _authenticate(request)
+        params = _company_query_params(request)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _client_holder().get_financial_analysis(token, **params)
+    except Exception as exc:
+        return _err(502, f"Boniforce upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def get_company_details(request: Request) -> Response:
+    try:
+        _, token = await _authenticate(request)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _client_holder().get_company_details(
+            token, request.path_params["report_id"]
+        )
+    except Exception as exc:
+        return _err(502, f"Boniforce upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def get_company_shareholders(request: Request) -> Response:
+    try:
+        _, token = await _authenticate(request)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _client_holder().get_company_shareholders(
+            token, request.path_params["report_id"]
+        )
+    except Exception as exc:
+        return _err(502, f"Boniforce upstream: {exc}")
+    return JSONResponse(data)
+
+
+async def get_company_holdings(request: Request) -> Response:
+    try:
+        _, token = await _authenticate(request)
+    except HTTPError as e:
+        return _err(e.status, e.message)
+    try:
+        data = await _client_holder().get_company_holdings(
+            token, request.path_params["report_id"]
+        )
     except Exception as exc:
         return _err(502, f"Boniforce upstream: {exc}")
     return JSONResponse(data)
@@ -472,6 +592,27 @@ async def get_sectorbench_meta(request: Request) -> Response:
 
 # ---------------- OpenAPI spec ----------------
 
+def _company_lookup_parameters() -> list[dict[str, Any]]:
+    descriptions = {
+        "company_name": "Company name; improves matching when register fields are used.",
+        "register_type": "German register type, such as HRB or HRA.",
+        "register_number": "German register number.",
+        "register_court": "German register court.",
+        "search_result_id": "Identifier returned by either company-search endpoint.",
+        "session_id": "Optional Boniforce session identifier.",
+    }
+    return [
+        {
+            "in": "query",
+            "name": name,
+            "required": False,
+            "schema": {"type": "string"},
+            "description": description,
+        }
+        for name, description in descriptions.items()
+    ]
+
+
 def _openapi_spec() -> dict[str, Any]:
     iss = get_settings().issuer
     return {
@@ -489,10 +630,11 @@ def _openapi_spec() -> dict[str, Any]:
                 "0. GET /api/v1/reports FIRST. If a completed report for the "
                 "company exists with created_at ≤30 days old, REUSE its "
                 "report_id (call /reports/{id} or /reports/{id}/financial_data). "
-                "Do NOT call POST /reports — that charges 1 credit and re-runs "
+                "Do NOT call POST /reports — that charges 75 credits and re-runs "
                 "a 30-120s computation that returns the same data.\n"
-                "1. Only if no fresh report exists: GET /api/v1/search → "
-                "POST /api/v1/reports → poll GET /api/v1/jobs/{id}/status?wait=40.\n"
+                "1. Only if no fresh report exists: GET /api/v1/search (then "
+                "/search/advanced only if needed) → POST /api/v1/reports using "
+                "search_result_id → poll GET /api/v1/jobs/{id}/status?wait=40.\n"
                 "Follow-up questions about a company you already have a report_id "
                 "for: ALWAYS reuse that report_id, never POST /reports again."
             ),
@@ -517,30 +659,59 @@ def _openapi_spec() -> dict[str, Any]:
                     "properties": {
                         "name": {"type": "string"},
                         "active": {"type": "boolean"},
-                        "register_type": {"type": "string"},
-                        "register_number": {"type": "string"},
-                        "register_court": {"type": "string"},
+                        "register_type": {"type": ["string", "null"]},
+                        "register_number": {"type": ["string", "null"]},
+                        "register_court": {"type": ["string", "null"]},
+                        "search_result_id": {"type": ["string", "null"]},
+                        "registered_office": {
+                            "type": ["string", "null"],
+                            "description": (
+                                "City used to disambiguate advanced-search results."
+                            ),
+                        },
                     },
+                    "required": ["name", "active"],
                 },
                 "Report": {
                     "type": "object",
                     "properties": {
                         "report_id": {"type": "string"},
                         "version": {"type": "number"},
-                        "score": {"type": "number", "description": "Boniscore 0–100; higher = lower risk."},
-                        "score_details": {
-                            "type": "object",
-                            "properties": {
-                                "label": {"type": "string"},
-                                "color_code": {"type": "integer"},
-                            },
+                        "score": {
+                            "type": ["integer", "null"],
+                            "description": "Boniscore 0–100; higher = lower risk.",
                         },
-                        "credit_limit": {"type": "number"},
+                        "score_details": {
+                            "oneOf": [
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "label": {"type": "string"},
+                                        "color_code": {"type": "integer"},
+                                        "range": {"type": ["string", "null"]},
+                                        "description": {"type": ["string", "null"]},
+                                    },
+                                },
+                                {"type": "null"},
+                            ]
+                        },
+                        "credit_limit": {"type": ["number", "null"]},
                         "credit_assessment_result": {
-                            "type": "string",
+                            "type": ["string", "null"],
                             "description": "APPROVE / REVIEW / DECLINE",
                         },
+                        "assessments": {"type": ["array", "null"]},
+                        "company": {"type": ["object", "null"]},
+                        "status": {
+                            "type": ["string", "null"],
+                            "description": "Company state, e.g. active or liquidation.",
+                        },
+                        "created_at": {
+                            "type": ["string", "null"],
+                            "format": "date-time",
+                        },
                     },
+                    "required": ["report_id"],
                 },
                 "JobStatus": {
                     "type": "object",
@@ -712,7 +883,7 @@ def _openapi_spec() -> dict[str, Any]:
                 "FinancialDataResponse": {
                     "type": "object",
                     "description": (
-                        "Balance-sheet history attached to a finished report. "
+                        "Balance-sheet history returned directly or for a finished report. "
                         "`financials` is the per-year summary; `financial_reports` "
                         "is the full Aktiva/Passiva/GuV breakdown when available."
                     ),
@@ -736,6 +907,153 @@ def _openapi_spec() -> dict[str, Any]:
                             "nullable": True,
                         },
                     },
+                },
+                "FinancialRatio": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "value": {"type": "number"},
+                        "score": {"type": "integer"},
+                        "color": {"type": "integer"},
+                    },
+                    "required": ["name", "value", "score", "color"],
+                },
+                "FinancialAnalysisYear": {
+                    "allOf": [
+                        {"$ref": "#/components/schemas/FinancialFeaturesYear"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "score": {"type": ["number", "null"]},
+                                "ratios": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/FinancialRatio"
+                                    },
+                                },
+                            },
+                        },
+                    ]
+                },
+                "FinancialAnalysisResponse": {
+                    "type": "object",
+                    "properties": {
+                        "report_id": {"type": "string"},
+                        "register_type": {"type": "string"},
+                        "register_number": {"type": "string"},
+                        "register_court": {"type": "string"},
+                        "financials": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/components/schemas/FinancialAnalysisYear"
+                            },
+                        },
+                        "created_at": {"type": ["string", "null"]},
+                    },
+                },
+                "CompanyRegisterInformation": {
+                    "type": "object",
+                    "properties": {
+                        "register_type": {"type": ["string", "null"]},
+                        "register_number": {"type": ["string", "null"]},
+                        "register_court": {"type": ["string", "null"]},
+                    },
+                },
+                "CompanyFirmographics": {
+                    "type": "object",
+                    "properties": {
+                        "employees": {"type": ["integer", "null"]},
+                        "employees_class": {"type": ["string", "null"]},
+                        "legal_type": {"type": ["string", "null"]},
+                        "foundation_year": {"type": ["integer", "null"]},
+                    },
+                },
+                "Representative": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "role": {"type": ["string", "null"]},
+                        "type": {"type": "string"},
+                        "start_date": {"type": ["string", "null"], "format": "date"},
+                        "end_date": {"type": ["string", "null"], "format": "date"},
+                    },
+                    "required": ["name", "type"],
+                },
+                "CompanyDetailsResponse": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "report_id": {"type": "string"},
+                        "address": {"type": ["string", "null"]},
+                        "register_info": {
+                            "oneOf": [
+                                {"$ref": "#/components/schemas/CompanyRegisterInformation"},
+                                {"type": "null"},
+                            ]
+                        },
+                        "firmographics": {
+                            "oneOf": [
+                                {"$ref": "#/components/schemas/CompanyFirmographics"},
+                                {"type": "null"},
+                            ]
+                        },
+                        "representatives": {
+                            "type": "array",
+                            "items": {"$ref": "#/components/schemas/Representative"},
+                        },
+                    },
+                    "required": ["name", "report_id"],
+                },
+                "OwnershipEntry": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "type": {"type": "string"},
+                        "percentage_share": {"type": ["number", "null"]},
+                        "nominal_share": {"type": ["number", "null"]},
+                        "currency": {"type": ["string", "null"], "default": "EUR"},
+                        "register_info": {
+                            "oneOf": [
+                                {"$ref": "#/components/schemas/CompanyRegisterInformation"},
+                                {"type": "null"},
+                            ]
+                        },
+                    },
+                    "required": ["name", "type"],
+                },
+                "ShareholdersResponse": {
+                    "type": "object",
+                    "properties": {
+                        "report_id": {"type": "string"},
+                        "shareholders": {
+                            "type": "array",
+                            "items": {"$ref": "#/components/schemas/OwnershipEntry"},
+                        },
+                        "last_updated": {
+                            "type": ["string", "null"],
+                            "format": "date-time",
+                        },
+                        "available": {"type": "boolean", "default": True},
+                        "message": {"type": ["string", "null"]},
+                    },
+                    "required": ["report_id"],
+                },
+                "HoldingsResponse": {
+                    "type": "object",
+                    "properties": {
+                        "report_id": {"type": "string"},
+                        "holdings": {
+                            "type": "array",
+                            "items": {"$ref": "#/components/schemas/OwnershipEntry"},
+                        },
+                        "last_updated": {
+                            "type": ["string", "null"],
+                            "format": "date-time",
+                        },
+                        "available": {"type": "boolean", "default": True},
+                        "message": {"type": ["string", "null"]},
+                    },
+                    "required": ["report_id"],
                 },
                 "BranchKey": {
                     "type": "string",
@@ -938,6 +1256,39 @@ def _openapi_spec() -> dict[str, Any]:
                     },
                 }
             },
+            "/api/v1/search/advanced": {
+                "get": {
+                    "operationId": "searchCompaniesAdvanced",
+                    "summary": "Fallback search using broader company-name matching.",
+                    "description": (
+                        "Use only when normal search returns no suitable result. "
+                        "Costs 5 credits and includes registered_office for disambiguation."
+                    ),
+                    "parameters": [
+                        {
+                            "in": "query",
+                            "name": "query",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "List of matching companies.",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "array",
+                                        "items": {
+                                            "$ref": "#/components/schemas/Company"
+                                        },
+                                    }
+                                }
+                            },
+                        }
+                    },
+                }
+            },
             "/api/v1/reports": {
                 "get": {
                     "operationId": "listReports",
@@ -948,7 +1299,8 @@ def _openapi_spec() -> dict[str, Any]:
                     "operationId": "createReport",
                     "summary": "Start Boniscore report. Pass ?wait=40 to long-poll up to 40s.",
                     "description": (
-                        "Kicks off report generation. With ?wait=40 the server long-polls up "
+                        "Costs 75 credits. Identify the company with search_result_id or "
+                        "all register fields. With ?wait=40 the server long-polls up "
                         "to 40s and inlines the finished report. Reports take 30-120s — if "
                         "done=false, immediately call getJobStatus with ?wait=40 and repeat "
                         "(max 3 calls) until done=true. Never reply 'still processing' before "
@@ -969,18 +1321,15 @@ def _openapi_spec() -> dict[str, Any]:
                             "application/json": {
                                 "schema": {
                                     "type": "object",
-                                    "required": [
-                                        "company_name",
-                                        "register_type",
-                                        "register_number",
-                                        "register_court",
-                                    ],
                                     "properties": {
-                                        "company_name": {"type": "string"},
-                                        "register_type": {"type": "string"},
-                                        "register_number": {"type": "string"},
-                                        "register_court": {"type": "string"},
-                                        "session_id": {"type": "string"},
+                                        "company_name": {"type": ["string", "null"]},
+                                        "register_type": {"type": ["string", "null"]},
+                                        "register_number": {"type": ["string", "null"]},
+                                        "register_court": {"type": ["string", "null"]},
+                                        "search_result_id": {
+                                            "type": ["string", "null"]
+                                        },
+                                        "session_id": {"type": ["string", "null"]},
                                     },
                                 }
                             }
@@ -988,6 +1337,50 @@ def _openapi_spec() -> dict[str, Any]:
                     },
                     "responses": {"200": {"description": "Job accepted (and possibly inlined report when wait used)."}},
                 },
+            },
+            "/api/v1/financial_data": {
+                "get": {
+                    "operationId": "getFinancialData",
+                    "summary": "Fetch raw financial statements directly (25 credits).",
+                    "description": (
+                        "Identify the company with search_result_id or all register fields."
+                    ),
+                    "parameters": _company_lookup_parameters(),
+                    "responses": {
+                        "200": {
+                            "description": "Financial statement data.",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/FinancialDataResponse"
+                                    }
+                                }
+                            },
+                        }
+                    },
+                }
+            },
+            "/api/v1/financial_data/analysis": {
+                "get": {
+                    "operationId": "getFinancialAnalysis",
+                    "summary": "Fetch financial score and ratio analysis (50 credits).",
+                    "description": (
+                        "Identify the company with search_result_id or all register fields."
+                    ),
+                    "parameters": _company_lookup_parameters(),
+                    "responses": {
+                        "200": {
+                            "description": "Financial analysis.",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/FinancialAnalysisResponse"
+                                    }
+                                }
+                            },
+                        }
+                    },
+                }
             },
             "/api/v1/reports/{report_id}": {
                 "get": {
@@ -1001,7 +1394,16 @@ def _openapi_spec() -> dict[str, Any]:
                             "schema": {"type": "string"},
                         }
                     ],
-                    "responses": {"200": {"description": "OK"}},
+                    "responses": {
+                        "200": {
+                            "description": "Finished Boniscore report.",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Report"}
+                                }
+                            },
+                        }
+                    },
                 }
             },
             "/api/v1/jobs/{job_id}/status": {
@@ -1074,7 +1476,96 @@ def _openapi_spec() -> dict[str, Any]:
                             "schema": {"type": "string"},
                         }
                     ],
-                    "responses": {"200": {"description": "OK"}},
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/FinancialAnalysisResponse"
+                                    }
+                                }
+                            },
+                        }
+                    },
+                }
+            },
+            "/api/v1/company/{report_id}/details": {
+                "get": {
+                    "operationId": "getCompanyDetails",
+                    "summary": "Company metadata and representatives for a report.",
+                    "parameters": [
+                        {
+                            "in": "path",
+                            "name": "report_id",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Company details.",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/CompanyDetailsResponse"
+                                    }
+                                }
+                            },
+                        }
+                    },
+                }
+            },
+            "/api/v1/company/{report_id}/shareholders": {
+                "get": {
+                    "operationId": "getCompanyShareholders",
+                    "summary": "Shareholders; cached free or 25 credits on refresh.",
+                    "parameters": [
+                        {
+                            "in": "path",
+                            "name": "report_id",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Shareholders.",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/ShareholdersResponse"
+                                    }
+                                }
+                            },
+                        }
+                    },
+                }
+            },
+            "/api/v1/company/{report_id}/holdings": {
+                "get": {
+                    "operationId": "getCompanyHoldings",
+                    "summary": "Holdings; cached free or 25 credits on refresh.",
+                    "parameters": [
+                        {
+                            "in": "path",
+                            "name": "report_id",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Holdings.",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/HoldingsResponse"
+                                    }
+                                }
+                            },
+                        }
+                    },
                 }
             },
             "/api/v1/branches": {
@@ -1282,8 +1773,17 @@ def routes() -> list[Route]:
     return [
         Route("/api/openapi.json", openapi_json, methods=["GET"]),
         Route("/api/v1/search", search_companies, methods=["GET"]),
+        Route(
+            "/api/v1/search/advanced", search_companies_advanced, methods=["GET"]
+        ),
         Route("/api/v1/reports", list_reports, methods=["GET"]),
         Route("/api/v1/reports", create_report, methods=["POST"]),
+        Route("/api/v1/financial_data", get_financial_data, methods=["GET"]),
+        Route(
+            "/api/v1/financial_data/analysis",
+            get_financial_analysis,
+            methods=["GET"],
+        ),
         Route("/api/v1/reports/{report_id}", get_report, methods=["GET"]),
         Route("/api/v1/jobs/{job_id}/status", get_job_status, methods=["GET"]),
         Route(
@@ -1294,6 +1794,21 @@ def routes() -> list[Route]:
         Route(
             "/api/v1/reports/{report_id}/financial_data/analysis",
             get_report_financial_analysis,
+            methods=["GET"],
+        ),
+        Route(
+            "/api/v1/company/{report_id}/details",
+            get_company_details,
+            methods=["GET"],
+        ),
+        Route(
+            "/api/v1/company/{report_id}/shareholders",
+            get_company_shareholders,
+            methods=["GET"],
+        ),
+        Route(
+            "/api/v1/company/{report_id}/holdings",
+            get_company_holdings,
             methods=["GET"],
         ),
         # Sectorbench proxy. Static segments (`branches`, `branches/ranking`,

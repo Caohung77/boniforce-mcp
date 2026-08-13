@@ -51,9 +51,17 @@ class BoniforceClient:
         return resp.text
 
     # ---- endpoints ----
+    # POST /v1/user/api_keys is intentionally not proxied: MCP users must link
+    # an existing personal key through OAuth, and the upstream docs currently
+    # describe programmatic key creation as unsupported.
 
     async def search_companies(self, token: str, query: str) -> Any:
         return await self._request("GET", "/v1/search", token, params={"query": query})
+
+    async def search_companies_advanced(self, token: str, query: str) -> Any:
+        return await self._request(
+            "GET", "/v1/search/advanced", token, params={"query": query}
+        )
 
     async def list_reports(self, token: str) -> Any:
         return await self._request("GET", "/v1/reports", token)
@@ -61,17 +69,23 @@ class BoniforceClient:
     async def create_report(
         self,
         token: str,
-        company_name: str,
-        register_type: str,
-        register_number: str,
-        register_court: str,
+        company_name: str | None = None,
+        register_type: str | None = None,
+        register_number: str | None = None,
+        register_court: str | None = None,
         session_id: str | None = None,
+        search_result_id: str | None = None,
     ) -> Any:
         body = {
-            "company_name": company_name,
-            "register_type": register_type,
-            "register_number": register_number,
-            "register_court": register_court,
+            key: value
+            for key, value in {
+                "company_name": company_name,
+                "register_type": register_type,
+                "register_number": register_number,
+                "register_court": register_court,
+                "search_result_id": search_result_id,
+            }.items()
+            if value is not None
         }
         if session_id is not None:
             body["session_id"] = session_id
@@ -104,17 +118,23 @@ class BoniforceClient:
     async def get_financial_data(
         self,
         token: str,
-        company_name: str,
-        register_type: str,
-        register_number: str,
-        register_court: str,
+        company_name: str | None = None,
+        register_type: str | None = None,
+        register_number: str | None = None,
+        register_court: str | None = None,
         session_id: str | None = None,
+        search_result_id: str | None = None,
     ) -> Any:
         params = {
-            "company_name": company_name,
-            "register_type": register_type,
-            "register_number": register_number,
-            "register_court": register_court,
+            key: value
+            for key, value in {
+                "company_name": company_name,
+                "register_type": register_type,
+                "register_number": register_number,
+                "register_court": register_court,
+                "search_result_id": search_result_id,
+            }.items()
+            if value is not None
         }
         if session_id is not None:
             params["session_id"] = session_id
@@ -123,17 +143,23 @@ class BoniforceClient:
     async def get_financial_analysis(
         self,
         token: str,
-        company_name: str,
-        register_type: str,
-        register_number: str,
-        register_court: str,
+        company_name: str | None = None,
+        register_type: str | None = None,
+        register_number: str | None = None,
+        register_court: str | None = None,
         session_id: str | None = None,
+        search_result_id: str | None = None,
     ) -> Any:
         params = {
-            "company_name": company_name,
-            "register_type": register_type,
-            "register_number": register_number,
-            "register_court": register_court,
+            key: value
+            for key, value in {
+                "company_name": company_name,
+                "register_type": register_type,
+                "register_number": register_number,
+                "register_court": register_court,
+                "search_result_id": search_result_id,
+            }.items()
+            if value is not None
         }
         if session_id is not None:
             params["session_id"] = session_id
@@ -150,3 +176,14 @@ class BoniforceClient:
         return await self._request(
             "GET", f"/v1/reports/{report_id}/financial_data/analysis", token
         )
+
+    async def get_company_details(self, token: str, report_id: str) -> Any:
+        return await self._request("GET", f"/v1/company/{report_id}/details", token)
+
+    async def get_company_shareholders(self, token: str, report_id: str) -> Any:
+        return await self._request(
+            "GET", f"/v1/company/{report_id}/shareholders", token
+        )
+
+    async def get_company_holdings(self, token: str, report_id: str) -> Any:
+        return await self._request("GET", f"/v1/company/{report_id}/holdings", token)

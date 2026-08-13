@@ -13,7 +13,7 @@ tab-switching, no copy-paste, no extra logins.
 ## What you get
 
 🔍 **Search any German company by name** — Claude finds the register entry for
-you, no manual HRB lookup.
+you, including an advanced fallback for incomplete or alternative names.
 
 📊 **Boniscore + credit-limit recommendation on demand** — score from 0–100,
 APPROVE / REVIEW / DECLINE verdict, conservative + balanced + aggressive
@@ -22,6 +22,9 @@ credit-limit scenarios.
 📑 **Drill into the numbers** — balance-sheet history (Eigenkapital,
 Verbindlichkeiten, Bilanzsumme…) and per-year financial ratios, all from
 Bundesanzeiger filings.
+
+🏢 **Understand ownership and management** — retrieve representatives,
+shareholders, and company holdings for an existing report.
 
 ⚡ **Works mid-conversation** — the model decides when to call Boniforce, so
 you can ask follow-ups in plain language: *"Compare it to last year"*,
@@ -85,11 +88,11 @@ Then start a new conversation and ask:
 The plugin package is in
 [`plugins/boniforce-credit-check`](plugins/boniforce-credit-check), and a
 ready-to-upload archive is available as
-[`releases/boniforce-credit-check-plugin-0.1.0.zip`](releases/boniforce-credit-check-plugin-0.1.0.zip).
+[`releases/boniforce-credit-check-plugin-0.2.0.zip`](releases/boniforce-credit-check-plugin-0.2.0.zip).
 
 **Standalone skill.** Users who already connected the Boniforce MCP can
 download
-[`releases/boniforce-credit-check-skill-0.1.0.zip`](releases/boniforce-credit-check-skill-0.1.0.zip)
+[`releases/boniforce-credit-check-skill-0.2.0.zip`](releases/boniforce-credit-check-skill-0.2.0.zip)
 and extract the `boniforce-credit-check` folder into
 `$HOME/.agents/skills/`. Restart Codex if the skill does not appear.
 
@@ -310,12 +313,18 @@ the OAuth flow):
 | Tool                              | HTTP                                                            |
 |-----------------------------------|-----------------------------------------------------------------|
 | `search_companies`                | `GET /v1/search`                                                |
+| `search_companies_advanced`       | `GET /v1/search/advanced`                                       |
 | `list_reports`                    | `GET /v1/reports`                                               |
 | `create_report`                   | `POST /v1/reports`                                              |
 | `get_report`                      | `GET /v1/reports/{report_id}`                                   |
 | `get_job_status`                  | `GET /v1/jobs/{job_id}/status`                                  |
+| `get_financial_data`              | `GET /v1/financial_data`                                        |
+| `get_financial_analysis`          | `GET /v1/financial_data/analysis`                               |
 | `get_report_financial_data`       | `GET /v1/reports/{report_id}/financial_data`                    |
 | `get_report_financial_analysis`   | `GET /v1/reports/{report_id}/financial_data/analysis`           |
+| `get_company_details`             | `GET /v1/company/{report_id}/details`                           |
+| `get_company_shareholders`        | `GET /v1/company/{report_id}/shareholders`                      |
+| `get_company_holdings`            | `GET /v1/company/{report_id}/holdings`                          |
 
 Sectorbench branch-data tools (JWT-gated; upstream call uses the operator's
 shared `BF_SECTORBENCH_TOKEN` — end users do **not** need a Sectorbench key):

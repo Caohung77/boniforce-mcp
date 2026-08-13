@@ -72,8 +72,8 @@ Paste each line as a separate bullet:
 | **Protected resource metadata** | `https://mcp.boniforce.de/.well-known/oauth-protected-resource` |
 | **Transport** | `Streamable HTTP` (not SSE) |
 | **Origin-header validation** | ✅ enforced — only `claude.ai`, `chatgpt.com`, and the issuer origin pass |
-| **Read capabilities** | 15 tools (see Tools section) |
-| **Write capabilities** | 1 tool — `create_report` initiates a Bundesanzeiger fetch job |
+| **Read-only capabilities** | 17 tools (see Tools section) |
+| **Credit-spending capabilities** | 5 tools: report creation, two direct financial lookups, shareholders, and holdings |
 
 ---
 
@@ -84,12 +84,18 @@ If the form asks for a JSON or table dump, paste this table.
 | Tool | Title | readOnly | destructive | idempotent | openWorld |
 |---|---|---|---|---|---|
 | `search_companies` | Search German companies | T | F | T | T |
+| `search_companies_advanced` | Advanced German company search | T | F | T | T |
 | `list_reports` | List previously generated reports | T | F | T | F |
 | `create_report` | Start a Boniscore report | **F** | F | **F** | T |
 | `get_report` | Fetch finished Boniscore report | T | F | T | F |
 | `get_job_status` | Poll Boniscore job status | T | F | T | F |
+| `get_financial_data` | Fetch financial statements directly | **F** | F | **F** | T |
+| `get_financial_analysis` | Analyze financial statements directly | **F** | F | **F** | T |
 | `get_report_financial_data` | Balance-sheet history | T | F | T | F |
 | `get_report_financial_analysis` | Per-year financial ratio analysis | T | F | T | F |
+| `get_company_details` | Company details and representatives | T | F | T | F |
+| `get_company_shareholders` | Company shareholders | **F** | F | **F** | T |
+| `get_company_holdings` | Company holdings | **F** | F | **F** | T |
 | `list_branch_scores` | List German sector scores | T | F | T | T |
 | `get_branch_ranking` | Rank German sectors by health score | T | F | T | T |
 | `get_branch` | Sector snapshot | T | F | T | T |
@@ -100,9 +106,9 @@ If the form asks for a JSON or table dump, paste this table.
 | `list_branch_indicators` | List sector indicators | T | F | T | T |
 | `get_sectorbench_meta` | Sectorbench data freshness | T | F | T | T |
 
-Note: `create_report` is the only non-read-only tool — it starts a
-background job that pulls and indexes Bundesanzeiger filings. All
-others are idempotent reads. None are destructive.
+Note: five tools are marked non-read-only because they can spend credits or
+start background work. None are destructive. Shareholder and holdings calls
+are free when served from their one-week cache, but cost 25 credits on refresh.
 
 ---
 
@@ -158,11 +164,11 @@ https://github.com/Caohung77/boniforce-mcp
 | JWKS endpoint | ✅ |
 | Origin validation on `/mcp` (evil → 403) | ✅ |
 | Host allowlist | ✅ |
-| Tool annotations on all 16 tools | ✅ |
+| Tool annotations on all 22 tools | ✅ |
 | Logo URL reachable + correct MIME | ✅ |
 | Favicon URL reachable + correct MIME | ✅ |
 | TLS via Let's Encrypt | ✅ |
-| v0.4.0 deployed at `mcp.boniforce.de` | ✅ |
+| v0.5.0 deployed at `mcp.boniforce.de` | ✅ |
 
 ---
 

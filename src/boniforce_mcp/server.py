@@ -82,10 +82,11 @@ def _make_mcp() -> FastMCP:
             "     ZERO credits and is instant. Only fall through to steps 1-3 if no\n"
             "     fresh report exists, the existing one is >30 days old, or status is\n"
             "     failed/error.\n"
-            "  1. search_companies(query) -> get register_type, register_number, register_court.\n"
+            "  1. search_companies(query) -> get register fields + search_result_id. If it\n"
+            "     returns no match, use search_companies_advanced(query) as the fallback.\n"
             "  2. create_report(...) with wait_seconds=40 (default) -> response often already\n"
             "     contains `report` with the finished Boniscore. Check the `done` field.\n"
-            "     ⚠️ COSTS 1 CREDIT per call and takes 30-120s — see step 0 first.\n"
+            "     ⚠️ COSTS 75 CREDITS per call and takes 30-120s — see step 0 first.\n"
             "  3. If done=false, call get_job_status(job_id, wait_seconds=40). Repeat until\n"
             "     done=true. See LOOP RULE below.\n"
             "  4. When status='completed', call get_report(report_id) (only needed if `report`\n"
@@ -97,7 +98,7 @@ def _make_mcp() -> FastMCP:
             "  conversation, REUSE it for any follow-up score/financial question. Call\n"
             "  get_report / get_report_financial_data / get_report_financial_analysis\n"
             "  with that report_id. NEVER call create_report a second time for the same\n"
-            "  company in the same chat — that wastes a credit and gives the same result.\n\n"
+            "  company in the same chat — that wastes 75 credits and gives the same result.\n\n"
             "NEW CHAT, SAME COMPANY:\n"
             "  list_reports is account-wide and persists across chats. Step 0 catches this\n"
             "  case automatically — always run it before considering create_report.\n\n"
@@ -121,6 +122,12 @@ def _make_mcp() -> FastMCP:
             "404 from get_report_financial_* means no Bundesanzeiger annual filing exists\n"
             "yet for that company; report this as a data-availability issue, not an API\n"
             "error. The Boniscore itself from get_report is still valid in that case.\n\n"
+            "ADDITIONAL COMPANY TOOLS:\n"
+            "  get_company_details(report_id) is free and returns address, firmographics,\n"
+            "  and representatives. get_company_shareholders / get_company_holdings are\n"
+            "  free from a fresh one-week cache but cost 25 credits when refreshed.\n"
+            "  get_financial_data costs 25 credits and get_financial_analysis costs 50;\n"
+            "  use them only when direct financial data is requested without a full report.\n\n"
             "SECTORBENCH BRANCH-DATA TOOLS (deutsche Branchen-Intelligenz):\n"
             "  Use these tools — NEVER websearch — when the question mentions:\n"
             "  Branche, Branchen, Industrie, Sektor, sector, Branchen-Score,\n"
@@ -184,6 +191,29 @@ def _make_mcp() -> FastMCP:
     def _wrap(exc: BoniforceError) -> ToolError:
         return ToolError(f"Boniforce API returned {exc.status}: {exc.body}")
 
+    def _validate_company_identifier(
+        search_result_id: str | None,
+        register_type: str | None,
+        register_number: str | None,
+        register_court: str | None,
+    ) -> None:
+        if search_result_id:
+            return
+        missing = [
+            name
+            for name, value in (
+                ("register_type", register_type),
+                ("register_number", register_number),
+                ("register_court", register_court),
+            )
+            if not value
+        ]
+        if missing:
+            raise ToolError(
+                "Provide search_result_id or all register fields. Missing: "
+                + ", ".join(missing)
+            )
+
     @mcp.tool(
         annotations={
             "title": "Search German companies",
@@ -195,12 +225,31 @@ def _make_mcp() -> FastMCP:
     )
     async def search_companies(query: str) -> Any:
         """Step 1 of Boniscore workflow: search Boniforce for a German company by
-        name or partial name. Returns company entries each with company_name,
-        register_type (e.g. HRB, HRA, VR), register_number, register_court.
-        Pass these four fields verbatim into create_report next."""
+        name or partial name (cost: 1 credit). Results include register fields
+        and search_result_id. Pass search_result_id into create_report; if there
+        is no match, call search_companies_advanced."""
         _, token = await _user_token()
         try:
             return await _bf_client_from_state().search_companies(token, query)
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool(
+        annotations={
+            "title": "Advanced German company search",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
+    async def search_companies_advanced(query: str) -> Any:
+        """Fallback when search_companies returns no suitable match (cost: 5
+        credits). Finds partial/alternative names and returns search_result_id,
+        nullable register fields, and registered_office for disambiguation."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().search_companies_advanced(token, query)
         except BoniforceError as e:
             raise _wrap(e)
 
@@ -224,7 +273,7 @@ def _make_mcp() -> FastMCP:
           - If a match exists with status='completed' AND created_at is
             ≤30 days old → REUSE that report_id. Call get_report or
             get_report_financial_data with it. DO NOT call create_report
-            (which costs 1 credit and takes 30-120s for the same result).
+            (which costs 75 credits and takes 30-120s for the same result).
           - Else (no match, stale >30d, or failed) → proceed with
             search_companies + create_report."""
         _, token = await _user_token()
@@ -243,10 +292,11 @@ def _make_mcp() -> FastMCP:
         }
     )
     async def create_report(
-        company_name: str,
-        register_type: str,
-        register_number: str,
-        register_court: str,
+        company_name: str | None = None,
+        register_type: str | None = None,
+        register_number: str | None = None,
+        register_court: str | None = None,
+        search_result_id: str | None = None,
         session_id: str | None = None,
         wait_seconds: int = 40,
     ) -> Any:
@@ -255,9 +305,13 @@ def _make_mcp() -> FastMCP:
 
         ⚠️ PRECONDITION: call list_reports FIRST. Only call create_report
         if no completed report for this company exists with created_at
-        within the last 30 days. Each call CHARGES 1 CREDIT and re-runs a
+        within the last 30 days. Each call CHARGES 75 CREDITS and re-runs a
         30-120s computation that returns the same data. Re-creating for a
         company that already has a fresh report wastes credits.
+
+        Identify the company with search_result_id from either search tool, or
+        provide register_type, register_number, and register_court. Company
+        name is optional when search_result_id is supplied.
 
         With the default wait_seconds=40, the response inlines `final_status`
         and (if completed) the full `report`. Reports take 30-120s, so the
@@ -266,6 +320,9 @@ def _make_mcp() -> FastMCP:
         until done=True (typically ≤3 calls total). Never tell the user the
         job is "still processing" before you have called get_job_status at
         least 2 more times after this one."""
+        _validate_company_identifier(
+            search_result_id, register_type, register_number, register_court
+        )
         _, token = await _user_token()
         client = _bf_client_from_state()
         try:
@@ -275,6 +332,7 @@ def _make_mcp() -> FastMCP:
                 register_type=register_type,
                 register_number=register_number,
                 register_court=register_court,
+                search_result_id=search_result_id,
                 session_id=session_id,
             )
         except BoniforceError as e:
@@ -391,6 +449,139 @@ def _make_mcp() -> FastMCP:
         _, token = await _user_token()
         try:
             return await _bf_client_from_state().get_report_financial_analysis(token, report_id)
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool(
+        annotations={
+            "title": "Fetch financial statements directly",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        }
+    )
+    async def get_financial_data(
+        company_name: str | None = None,
+        register_type: str | None = None,
+        register_number: str | None = None,
+        register_court: str | None = None,
+        search_result_id: str | None = None,
+        session_id: str | None = None,
+    ) -> Any:
+        """Fetch raw per-year financial statements without creating a Boniscore
+        report. Costs 25 credits per request. Identify the company using
+        search_result_id or all three register fields."""
+        _validate_company_identifier(
+            search_result_id, register_type, register_number, register_court
+        )
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().get_financial_data(
+                token,
+                company_name=company_name,
+                register_type=register_type,
+                register_number=register_number,
+                register_court=register_court,
+                search_result_id=search_result_id,
+                session_id=session_id,
+            )
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool(
+        annotations={
+            "title": "Analyze financial statements directly",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        }
+    )
+    async def get_financial_analysis(
+        company_name: str | None = None,
+        register_type: str | None = None,
+        register_number: str | None = None,
+        register_court: str | None = None,
+        search_result_id: str | None = None,
+        session_id: str | None = None,
+    ) -> Any:
+        """Fetch financial features, score, and ratio analysis without creating
+        a Boniscore report. Costs 50 credits per request. Identify the company
+        using search_result_id or all three register fields."""
+        _validate_company_identifier(
+            search_result_id, register_type, register_number, register_court
+        )
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().get_financial_analysis(
+                token,
+                company_name=company_name,
+                register_type=register_type,
+                register_number=register_number,
+                register_court=register_court,
+                search_result_id=search_result_id,
+                session_id=session_id,
+            )
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool(
+        annotations={
+            "title": "Company details and representatives",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    )
+    async def get_company_details(report_id: str) -> Any:
+        """Free metadata lookup for a previously generated report. Returns the
+        company address, register information, firmographics, and current or
+        former representatives such as managing directors and Prokuristen."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().get_company_details(token, report_id)
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool(
+        annotations={
+            "title": "Company shareholders",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        }
+    )
+    async def get_company_shareholders(report_id: str) -> Any:
+        """Return shareholders for a previously generated report. Fresh cached
+        data is free; a missing or week-old cache is refreshed for 25 credits.
+        The response includes last_updated so freshness is visible."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().get_company_shareholders(
+                token, report_id
+            )
+        except BoniforceError as e:
+            raise _wrap(e)
+
+    @mcp.tool(
+        annotations={
+            "title": "Company holdings",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        }
+    )
+    async def get_company_holdings(report_id: str) -> Any:
+        """Return companies owned by the company in a previously generated
+        report. Fresh cached data is free; a missing or week-old cache is
+        refreshed for 25 credits. The response includes last_updated."""
+        _, token = await _user_token()
+        try:
+            return await _bf_client_from_state().get_company_holdings(token, report_id)
         except BoniforceError as e:
             raise _wrap(e)
 

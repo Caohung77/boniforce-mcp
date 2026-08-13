@@ -18,7 +18,7 @@ Reference: https://claude.com/docs/connectors/building/submission
 | TLS termination | ✅ Caddy + Let's Encrypt |
 | Privacy policy URL exists | ⚠️ `boniforce.de/datenschutz` — needs MCP addendum |
 | **Origin-header validation** | ❌ |
-| **Tool annotations on all 16 tools** | ❌ |
+| **Tool annotations on all 22 tools** | ❌ |
 | **Logo + favicon assets** | ❌ |
 | **Public docs URL (live by publish)** | ⚠️ only README on GitHub |
 | **Privacy-policy MCP coverage** | ⚠️ needs review |
@@ -92,12 +92,18 @@ annotated form.
 | Tool | title | readOnly | destructive | idempotent | openWorld |
 |---|---|---|---|---|---|
 | `search_companies` | "Search German companies" | T | F | T | T |
+| `search_companies_advanced` | "Advanced German company search" | T | F | T | T |
 | `list_reports` | "List previously generated reports" | T | F | T | F |
 | `create_report` | "Start a Boniscore report" | **F** | F | **F** | T |
 | `get_report` | "Fetch finished report" | T | F | T | F |
 | `get_job_status` | "Poll report job" | T | F | T | F |
+| `get_financial_data` | "Fetch financial statements directly" | **F** | F | **F** | T |
+| `get_financial_analysis` | "Analyze financial statements directly" | **F** | F | **F** | T |
 | `get_report_financial_data` | "Balance-sheet history" | T | F | T | F |
 | `get_report_financial_analysis` | "Per-year ratio analysis" | T | F | T | F |
+| `get_company_details` | "Company details and representatives" | T | F | T | F |
+| `get_company_shareholders` | "Company shareholders" | **F** | F | **F** | T |
+| `get_company_holdings` | "Company holdings" | **F** | F | **F** | T |
 | `list_branch_scores` | "List German sector scores" | T | F | T | T |
 | `get_branch_ranking` | "Rank sectors by health" | T | F | T | T |
 | `get_branch` | "Sector snapshot" | T | F | T | T |
@@ -219,9 +225,9 @@ submission date.
 | Use cases | (1) B2B sales credit screening (2) AR / credit-controller workflows (3) M&A and investment due diligence (4) Sector outlook briefings for German SMEs |
 | Auth type | OAuth 2.1 (PKCE S256, DCR) |
 | Transport | Streamable HTTP |
-| Read capabilities | 15 tools — listed |
-| Write capabilities | `create_report` — initiates Bundesanzeiger fetch |
-| Tools list | 16 tools with annotations from B2 |
+| Read-only capabilities | 17 tools — listed |
+| Credit-spending capabilities | 5 tools — report, direct financial, ownership refreshes |
+| Tools list | 22 tools with annotations from B2 |
 | Data handling | "Per-user OAuth token; Fernet at rest; sha256 user-id; no chat content stored" |
 | Third-party connections | `api.boniforce.de`, `sectorbench.theaiwhisperer.cloud` |
 | Category | Productivity (or Finance if available) |

@@ -130,12 +130,18 @@ want in German or English.
 | Tool | What it does |
 |------|--------------|
 | `search_companies` | Find a German company by name → register info |
+| `search_companies_advanced` | Broader fallback search → `search_result_id` + city |
 | `list_reports` | Reports you have already generated |
 | `create_report` | Start a Boniscore report (write tool — initiates Bundesanzeiger fetch) |
 | `get_report` | Boniscore, credit limit, APPROVE / REVIEW / DECLINE verdict |
 | `get_job_status` | Poll a long-running report job (30–120 s typical) |
+| `get_financial_data` | Direct financial statements (25 credits) |
+| `get_financial_analysis` | Direct financial score + ratios (50 credits) |
 | `get_report_financial_data` | Per-year balance-sheet data |
 | `get_report_financial_analysis` | Per-year financial ratios + sub-scores |
+| `get_company_details` | Address, firmographics, and representatives |
+| `get_company_shareholders` | Shareholders (free cached; 25 credits on refresh) |
+| `get_company_holdings` | Company holdings (free cached; 25 credits on refresh) |
 
 ### Sectorbench sector-intelligence tools (no extra credentials)
 

@@ -24,6 +24,20 @@ async def test_search_companies_passes_bearer(respx_mock):
 
 @pytest.mark.asyncio
 @respx.mock(assert_all_called=False)
+async def test_advanced_search_uses_current_endpoint(respx_mock):
+    route = respx_mock.get("https://api.boniforce.de/v1/search/advanced").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    client = BoniforceClient()
+    try:
+        await client.search_companies_advanced("tok", "ACME")
+    finally:
+        await client.aclose()
+    assert dict(route.calls.last.request.url.params) == {"query": "ACME"}
+
+
+@pytest.mark.asyncio
+@respx.mock(assert_all_called=False)
 async def test_create_report_posts_json(respx_mock):
     route = respx_mock.post("https://api.boniforce.de/v1/reports").mock(
         return_value=httpx.Response(202, json={"job_id": "j1"})
@@ -43,6 +57,67 @@ async def test_create_report_posts_json(respx_mock):
     body = route.calls.last.request.read()
     assert b"ACME GmbH" in body
     assert b"HRB" in body
+
+
+@pytest.mark.asyncio
+@respx.mock(assert_all_called=False)
+async def test_create_report_accepts_search_result_id(respx_mock):
+    route = respx_mock.post("https://api.boniforce.de/v1/reports").mock(
+        return_value=httpx.Response(200, json={"job_id": "j1", "report_id": "r1"})
+    )
+    client = BoniforceClient()
+    try:
+        await client.create_report("tok", search_result_id="search-1")
+    finally:
+        await client.aclose()
+    assert route.calls.last.request.content == b'{"search_result_id":"search-1"}'
+
+
+@pytest.mark.parametrize(
+    ("method_name", "path"),
+    [
+        ("get_financial_data", "/v1/financial_data"),
+        ("get_financial_analysis", "/v1/financial_data/analysis"),
+    ],
+)
+@pytest.mark.asyncio
+@respx.mock(assert_all_called=False)
+async def test_direct_financial_endpoints_accept_search_result_id(
+    respx_mock, method_name, path
+):
+    route = respx_mock.get(f"https://api.boniforce.de{path}").mock(
+        return_value=httpx.Response(200, json={"report_id": "r1", "financials": []})
+    )
+    client = BoniforceClient()
+    try:
+        await getattr(client, method_name)("tok", search_result_id="search-1")
+    finally:
+        await client.aclose()
+    assert dict(route.calls.last.request.url.params) == {
+        "search_result_id": "search-1"
+    }
+
+
+@pytest.mark.parametrize(
+    ("method_name", "path"),
+    [
+        ("get_company_details", "/v1/company/r1/details"),
+        ("get_company_shareholders", "/v1/company/r1/shareholders"),
+        ("get_company_holdings", "/v1/company/r1/holdings"),
+    ],
+)
+@pytest.mark.asyncio
+@respx.mock(assert_all_called=False)
+async def test_company_metadata_endpoints(respx_mock, method_name, path):
+    route = respx_mock.get(f"https://api.boniforce.de{path}").mock(
+        return_value=httpx.Response(200, json={"report_id": "r1"})
+    )
+    client = BoniforceClient()
+    try:
+        await getattr(client, method_name)("tok", "r1")
+    finally:
+        await client.aclose()
+    assert route.called
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 ---
 name: boniforce-credit-check
-description: Use Boniforce automatically for requests about a German company's Boniscore, creditworthiness, Bonität, Kreditlimit, payment risk, APPROVE/REVIEW/DECLINE assessment, balance-sheet history, or financial analysis. Trigger on phrases such as "Boniscore", "Boniforce", "Bonitätsprüfung", "check this German company", and "can I extend credit to this company". Do not use for private individuals, non-German companies, generic financial education, or sector-only questions.
+description: Use Boniforce automatically for requests about a German company's Boniscore, creditworthiness, Bonität, Kreditlimit, payment risk, APPROVE/REVIEW/DECLINE assessment, balance-sheet history, financial analysis, representatives, shareholders, or holdings. Trigger on phrases such as "Boniscore", "Boniforce", "Bonitätsprüfung", "check this German company", and "can I extend credit to this company". Do not use for private individuals, non-German companies, generic financial education, or sector-only questions.
 ---
 
 # Boniforce Credit Check
@@ -15,7 +15,7 @@ Use the Boniforce MCP tools to retrieve live German company credit data. Never e
 
 ## Authorization rule
 
-- Treat an explicit request to **get, check, calculate, create, run, or show** a current Boniscore as authorization to perform the workflow below, including spending one Boniforce credit only when a reusable report does not exist.
+- Treat an explicit request to **get, check, calculate, create, run, or show** a current Boniscore as authorization to perform the workflow below, including spending 75 Boniforce credits only when a reusable report does not exist.
 - Do not create a report when the user is merely asking how Boniforce or Boniscore works.
 - Ask for confirmation before creating a report if the request is ambiguous about whether the user wants a live check.
 - Never create a second report for the same company when a suitable recent report or a report ID from the conversation is available.
@@ -33,14 +33,14 @@ Follow this sequence exactly.
 
 ### 2. Identify the company
 
-- If no reusable report exists, call `search_companies` with the company name.
+- If no reusable report exists, call `search_companies` with the company name. Use `search_companies_advanced` only when normal search returns no suitable match.
 - Use register court, register type, register number, city, and legal name supplied by the user to select the exact result.
-- If several plausible matches remain, show a concise numbered list and ask the user to choose. Do not spend a credit until the company is unambiguous.
+- If several plausible matches remain, show a concise numbered list and ask the user to choose. Do not spend 75 credits until the company is unambiguous.
 - If there is one clear match, continue without unnecessary confirmation.
 
 ### 3. Create and finish a report
 
-- Call `create_report` once with the selected company's returned fields verbatim and `wait_seconds=40`.
+- Call `create_report` once with the selected company's `search_result_id` (preferred), or its complete register fields, and `wait_seconds=40`.
 - Inspect `done` after the call. If `done=false`, call `get_job_status` immediately with the same `job_id` and `wait_seconds=40`.
 - If it remains incomplete, call `get_job_status` once more. Keep all polling in the same user turn.
 - When completed, use the inlined report when present; otherwise call `get_report` with the returned `report_id`.
@@ -64,6 +64,9 @@ Mention that the result is decision support, not a guarantee. Do not expose acce
 - Reuse the same `report_id` for follow-up questions about the company.
 - Use `get_report_financial_data` for annual figures and balance-sheet history.
 - Use `get_report_financial_analysis` for derived ratios and interpretation.
+- Use `get_company_details` for address, firmographics, and representatives.
+- Call `get_company_shareholders` or `get_company_holdings` only when the user explicitly requests ownership data. Warn that a stale or missing cache refresh costs 25 credits; a fresh cached response is free.
+- Use the direct `get_financial_data` (25 credits) or `get_financial_analysis` (50 credits) tools only when the user explicitly wants financial data without a full Boniscore report.
 - Explain a 404 from either financial-detail tool as unavailable Bundesanzeiger filing data; the Boniscore itself can still be valid.
 
 ## Failure handling

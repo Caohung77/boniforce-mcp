@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-08-13
+
+### Added
+- Add MCP tools, REST routes, OpenAPI schemas, and tests for advanced company
+  search, direct financial data/analysis, company details, shareholders, and
+  holdings from the current Boniforce API.
+
+### Changed
+- Report creation now accepts `search_result_id` as an alternative to complete
+  register fields, matching the current upstream request contract.
+- Programmatic API-key creation remains intentionally excluded: MCP users link
+  an existing key through OAuth, and the upstream endpoint is documented as
+  currently unsupported.
+
+### Fixed
+- Correct the report-creation cost shown in MCP, OpenAPI, and the bundled
+  credit-check skill to the current 75 credits.
+
 ## [0.4.9] — 2026-05-27
 
 ### Security
@@ -226,6 +244,7 @@ No breaking API changes.
 - Pytest suite (10 tests) covering httpx client, full OAuth 2.1 PKCE +
   DCR + refresh, JWKS shape, and REST endpoints.
 
+[0.5.0]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.5.0
 [0.3.1]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Caohung77/boniforce-mcp/releases/tag/v0.2.0

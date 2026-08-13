@@ -61,6 +61,22 @@ def _mint_jwt(user_id: str) -> str:
     )
 
 
+async def _seed_user() -> tuple[str, str]:
+    from boniforce_mcp import storage
+
+    await storage.init_db()
+    user_id = str(uuid.uuid4())
+    async with storage._connect() as db:
+        storage._row(db)
+        await db.execute(
+            "INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)",
+            (user_id, f"x-{user_id}@test", "hash", int(time.time())),
+        )
+        await db.commit()
+    await storage.set_bf_token(user_id, "bf-test-key", "test")
+    return user_id, _mint_jwt(user_id)
+
+
 def test_openapi_spec_served(app):
     with TestClient(app) as c:
         r = c.get("/api/openapi.json")
@@ -77,8 +93,26 @@ def test_openapi_spec_served(app):
     assert "createReport" in op_ids
     assert "getReport" in op_ids
     assert "getJobStatus" in op_ids
+    assert {
+        "searchCompaniesAdvanced",
+        "getFinancialData",
+        "getFinancialAnalysis",
+        "getCompanyDetails",
+        "getCompanyShareholders",
+        "getCompanyHoldings",
+    } <= op_ids
     # OAuth flow advertised
     assert "OAuth2" in spec["components"]["securitySchemes"]
+    assert "charges 75 credits" in spec["info"]["description"]
+    assert "charges 100 credits" not in spec["info"]["description"]
+    assert "charges 1 credit" not in spec["info"]["description"]
+    company = spec["components"]["schemas"]["Company"]["properties"]
+    assert {"search_result_id", "registered_office"} <= company.keys()
+    create_schema = spec["paths"]["/api/v1/reports"]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["schema"]
+    assert "search_result_id" in create_schema["properties"]
+    assert "required" not in create_schema
 
 
 def test_rest_unauthenticated_rejected(app):
@@ -89,19 +123,7 @@ def test_rest_unauthenticated_rejected(app):
 
 @pytest.mark.asyncio
 async def test_rest_search_with_real_jwt(app):
-    from boniforce_mcp import storage
-
-    # Seed a user + BF token directly (skip OAuth flow for unit test).
-    await storage.init_db()
-    user_id = str(uuid.uuid4())
-    async with storage._connect() as db:
-        storage._row(db)
-        await db.execute(
-            "INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)",
-            (user_id, f"x-{user_id}@test", "hash", int(time.time())),
-        )
-        await db.commit()
-    await storage.set_bf_token(user_id, "bf-test-key", "test")
+    _, token = await _seed_user()
 
     with respx.mock(assert_all_called=False) as rx:
         rx.get("https://api.boniforce.de/v1/search").mock(
@@ -110,13 +132,65 @@ async def test_rest_search_with_real_jwt(app):
             )
         )
         with TestClient(app) as c:
-            token = _mint_jwt(user_id)
             r = c.get(
                 "/api/v1/search?query=ACME",
                 headers={"authorization": f"Bearer {token}"},
             )
     assert r.status_code == 200, r.text
     assert r.json()[0]["name"] == "ACME"
+
+
+@pytest.mark.asyncio
+async def test_rest_create_report_accepts_search_result_id(app):
+    _, token = await _seed_user()
+    with respx.mock(assert_all_called=True) as rx:
+        route = rx.post("https://api.boniforce.de/v1/reports").mock(
+            return_value=httpx.Response(
+                200, json={"job_id": "j1", "report_id": "r1", "status": "queued"}
+            )
+        )
+        with TestClient(app) as c:
+            r = c.post(
+                "/api/v1/reports",
+                headers={"authorization": f"Bearer {token}"},
+                json={"search_result_id": "search-1"},
+            )
+    assert r.status_code == 200, r.text
+    assert route.calls.last.request.content == b'{"search_result_id":"search-1"}'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("proxy_path", "upstream_path"),
+    [
+        ("/api/v1/search/advanced?query=ACME", "/v1/search/advanced"),
+        (
+            "/api/v1/financial_data?search_result_id=search-1",
+            "/v1/financial_data",
+        ),
+        (
+            "/api/v1/financial_data/analysis?search_result_id=search-1",
+            "/v1/financial_data/analysis",
+        ),
+        ("/api/v1/company/r1/details", "/v1/company/r1/details"),
+        ("/api/v1/company/r1/shareholders", "/v1/company/r1/shareholders"),
+        ("/api/v1/company/r1/holdings", "/v1/company/r1/holdings"),
+    ],
+)
+async def test_current_rest_get_routes_proxy_to_upstream(
+    app, proxy_path, upstream_path
+):
+    _, token = await _seed_user()
+    with respx.mock(assert_all_called=True) as rx:
+        rx.get(f"https://api.boniforce.de{upstream_path}").mock(
+            return_value=httpx.Response(200, json={"report_id": "r1"})
+        )
+        with TestClient(app) as c:
+            r = c.get(
+                proxy_path,
+                headers={"authorization": f"Bearer {token}"},
+            )
+    assert r.status_code == 200, r.text
 
 
 def test_rest_create_report_requires_fields(app):
