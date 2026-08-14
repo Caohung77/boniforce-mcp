@@ -10,6 +10,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Send German MCP progress notifications with elapsed time while Boniscore
   reports are being generated or polled. Clients without progress support
   continue to use the existing responses unchanged.
+- Expose ChatGPT invocation-status metadata for Boniscore creation and polling,
+  so the chat shows a visible German status while long-running tools execute.
 - Add Boniforce Credit Intelligence plugin v0.3.2, refreshing the installable
   package so new tasks resolve the current skill cache and instructing the
   skill to avoid duplicating the server's localized progress notifications.

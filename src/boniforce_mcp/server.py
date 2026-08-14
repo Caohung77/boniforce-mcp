@@ -396,7 +396,11 @@ def _make_mcp() -> FastMCP:
             "destructiveHint": False,
             "idempotentHint": False,
             "openWorldHint": True,
-        }
+        },
+        meta={
+            "openai/toolInvocation/invoking": "Boniscore-Bericht wird erstellt …",
+            "openai/toolInvocation/invoked": "Boniscore-Anfrage abgeschlossen",
+        },
     )
     async def create_report(
         ctx: Context,
@@ -509,7 +513,11 @@ def _make_mcp() -> FastMCP:
             "destructiveHint": False,
             "idempotentHint": True,
             "openWorldHint": False,
-        }
+        },
+        meta={
+            "openai/toolInvocation/invoking": "Boniscore-Berechnung läuft …",
+            "openai/toolInvocation/invoked": "Boniscore-Status aktualisiert",
+        },
     )
     async def get_job_status(
         ctx: Context, job_id: str, wait_seconds: int = 40

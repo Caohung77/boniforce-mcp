@@ -43,6 +43,14 @@ async def test_mcp_exposes_current_boniforce_tool_surface():
     } & set(create_report.parameters.get("required", []))
     get_job_status = next(tool for tool in tools if tool.name == "get_job_status")
     assert "ctx" not in get_job_status.parameters["properties"]
+    assert create_report.meta == {
+        "openai/toolInvocation/invoking": "Boniscore-Bericht wird erstellt …",
+        "openai/toolInvocation/invoked": "Boniscore-Anfrage abgeschlossen",
+    }
+    assert get_job_status.meta == {
+        "openai/toolInvocation/invoking": "Boniscore-Berechnung läuft …",
+        "openai/toolInvocation/invoked": "Boniscore-Status aktualisiert",
+    }
 
 
 def test_boniscore_progress_messages_are_german():
