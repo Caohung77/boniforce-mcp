@@ -13,6 +13,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Make `create_report` return immediately by default so the progress card can
   appear before the 30-120 second report generation finishes. Non-UI clients
   keep the same model-driven polling and final response workflow.
+
+### Fixed
+- Base the live card's estimated progress on the typical 120-second report
+  duration, listen for delayed ChatGPT `openai:set_globals` tool output, and
+  keep the progress bar visible at 100% when the finished report arrives.
 - Send German MCP progress notifications with elapsed time while Boniscore
   reports are being generated or polled. Clients without progress support
   continue to use the existing responses unchanged.

@@ -202,7 +202,7 @@ BONISCORE_PROGRESS_HTML = r"""
     .card.complete::before { background: var(--green); }
     .card.complete .dot { background: var(--green); animation: none; box-shadow: none; }
     .card.complete .progress { background: var(--green); }
-    .card.complete .progress-shell, .card.failed .progress-shell { display: none; }
+    .card.failed .progress-shell { display: none; }
     .card.complete .result { display: grid; }
     .card.failed::before { background: var(--red); }
     .card.failed .dot { background: var(--red); animation: none; box-shadow: none; }
@@ -247,7 +247,7 @@ BONISCORE_PROGRESS_HTML = r"""
     <h1 id="title">Boniscore-Bericht gestartet</h1>
     <p class="message" id="message">Die Unternehmensdaten werden geprüft.</p>
 
-    <div class="progress-shell" role="progressbar" aria-label="Fortschritt" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8" id="progressShell">
+    <div class="progress-shell" role="progressbar" aria-label="Geschätzter Fortschritt" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8" id="progressShell">
       <div class="progress" id="progress"></div>
     </div>
     <div class="footer" id="footer">
@@ -287,6 +287,7 @@ BONISCORE_PROGRESS_HTML = r"""
       const openChat = document.getElementById("openChat");
 
       const pendingRequests = new Map();
+      const AVERAGE_DURATION_SECONDS = 120;
       let nextRequestId = 1;
       let startedAt = Date.now();
       let jobId = null;
@@ -295,6 +296,7 @@ BONISCORE_PROGRESS_HTML = r"""
       let stopped = false;
       let fetchingReport = false;
       let pollTimer = null;
+      let bootstrapTimer = null;
 
       function bridgeRequest(method, params) {
         const id = nextRequestId++;
@@ -310,14 +312,10 @@ BONISCORE_PROGRESS_HTML = r"""
       }
 
       async function callTool(name, args) {
-        try {
-          return await bridgeRequest("tools/call", { name, arguments: args });
-        } catch (error) {
-          if (window.openai && typeof window.openai.callTool === "function") {
-            return window.openai.callTool(name, args);
-          }
-          throw error;
+        if (window.openai && typeof window.openai.callTool === "function") {
+          return window.openai.callTool(name, args);
         }
+        return bridgeRequest("tools/call", { name, arguments: args });
       }
 
       function unwrap(result) {
@@ -341,12 +339,31 @@ BONISCORE_PROGRESS_HTML = r"""
         return `${minutes}:${seconds}`;
       }
 
+      function estimatedProgress(seconds) {
+        if (seconds <= AVERAGE_DURATION_SECONDS) {
+          const ratio = Math.max(0, seconds) / AVERAGE_DURATION_SECONDS;
+          const eased = 1 - Math.pow(1 - ratio, 1.35);
+          return 8 + 86 * eased;
+        }
+        const overtime = seconds - AVERAGE_DURATION_SECONDS;
+        return Math.min(98, 94 + 4 * (1 - Math.exp(-overtime / 120)));
+      }
+
+      function estimatedPhase(seconds) {
+        if (seconds < 20) return "Daten werden vorbereitet";
+        if (seconds < 70) return "Register- und Finanzdaten werden geprüft";
+        if (seconds < AVERAGE_DURATION_SECONDS) return "Risikoindikatoren werden ausgewertet";
+        if (seconds < AVERAGE_DURATION_SECONDS + 30) return "Boniscore wird finalisiert";
+        return "Abschluss dauert etwas länger als üblich";
+      }
+
       function tick() {
         if (stopped) return;
-        elapsedEl.textContent = formatElapsed();
         const seconds = (Date.now() - startedAt) / 1000;
-        if (["queued", "pending"].includes(lastStatus)) setProgress(Math.min(28, 10 + seconds * .35));
-        else setProgress(Math.min(91, 30 + seconds * .55));
+        const estimate = Math.round(estimatedProgress(seconds));
+        setProgress(estimate);
+        phaseEl.textContent = estimatedPhase(seconds);
+        elapsedEl.textContent = `${estimate} % · ${formatElapsed()} / Ø 02:00`;
       }
 
       function statusCopy(status) {
@@ -401,12 +418,13 @@ BONISCORE_PROGRESS_HTML = r"""
         const report = unwrap(payload);
         stopped = true;
         if (pollTimer) window.clearTimeout(pollTimer);
+        if (bootstrapTimer) window.clearInterval(bootstrapTimer);
         card.classList.add("complete");
         stateEl.textContent = "Fertig";
         titleEl.textContent = "Boniscore liegt vor";
         messageEl.textContent = "Die Bonitätsprüfung wurde erfolgreich abgeschlossen.";
-        phaseEl.textContent = "Ergebnis bereit";
-        elapsedEl.textContent = formatElapsed();
+        phaseEl.textContent = "Ergebnis bereit · abgeschlossen";
+        elapsedEl.textContent = `100 % · ${formatElapsed()}`;
         setProgress(100);
         scoreEl.textContent = report.score === null || report.score === undefined ? "—" : String(report.score);
         decisionEl.textContent = decisionText(report);
@@ -419,6 +437,7 @@ BONISCORE_PROGRESS_HTML = r"""
       function fail(message) {
         stopped = true;
         if (pollTimer) window.clearTimeout(pollTimer);
+        if (bootstrapTimer) window.clearInterval(bootstrapTimer);
         card.classList.add("failed");
         stateEl.textContent = "Fehler";
         titleEl.textContent = "Bericht nicht abgeschlossen";
@@ -454,8 +473,33 @@ BONISCORE_PROGRESS_HTML = r"""
       function acceptInitial(payload) {
         const data = unwrap(payload);
         if (!data || (!data.job_id && !data.report_id && !data.report)) return;
+        if (bootstrapTimer) {
+          window.clearInterval(bootstrapTimer);
+          bootstrapTimer = null;
+        }
         renderStatus(data);
         if (!stopped && jobId && !pollTimer) pollTimer = window.setTimeout(poll, 500);
+      }
+
+      function acceptOpenAIState(globals) {
+        if (!globals || typeof globals !== "object") return;
+        const metadata = globals.toolResponseMetadata || {};
+        const mcpResult = metadata.mcp_tool_result || metadata.mcpToolResult;
+        const callResult = metadata.call_tool_result || metadata.callToolResult;
+        const candidates = [
+          globals.toolOutput,
+          mcpResult && mcpResult.structuredContent,
+          mcpResult,
+          callResult && callResult.structuredContent,
+          callResult
+        ];
+        for (const candidate of candidates) {
+          const data = unwrap(candidate);
+          if (data && (data.job_id || data.report_id || data.report)) {
+            acceptInitial(data);
+            return;
+          }
+        }
       }
 
       window.addEventListener("message", (event) => {
@@ -476,6 +520,11 @@ BONISCORE_PROGRESS_HTML = r"""
         }
       }, { passive: true });
 
+      window.addEventListener("openai:set_globals", (event) => {
+        const globals = event.detail && event.detail.globals;
+        acceptOpenAIState(globals || window.openai);
+      }, { passive: true });
+
       openChat.addEventListener("click", () => {
         if (!reportId || !window.openai || typeof window.openai.sendFollowUpMessage !== "function") return;
         window.openai.sendFollowUpMessage({
@@ -486,7 +535,16 @@ BONISCORE_PROGRESS_HTML = r"""
 
       window.setInterval(tick, 1000);
       tick();
-      if (window.openai && window.openai.toolOutput) acceptInitial(window.openai.toolOutput);
+      acceptOpenAIState(window.openai);
+      let bootstrapAttempts = 0;
+      bootstrapTimer = window.setInterval(() => {
+        bootstrapAttempts += 1;
+        acceptOpenAIState(window.openai);
+        if (jobId || bootstrapAttempts >= 80) {
+          window.clearInterval(bootstrapTimer);
+          bootstrapTimer = null;
+        }
+      }, 250);
     })();
   </script>
 </body>

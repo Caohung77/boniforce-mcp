@@ -92,6 +92,11 @@ async def test_mcp_exposes_live_boniscore_progress_app():
     assert 'bridgeRequest("tools/call"' in result.contents[0].content
     assert 'callTool("get_job_status"' in result.contents[0].content
     assert 'callTool("get_report"' in result.contents[0].content
+    assert "AVERAGE_DURATION_SECONDS = 120" in result.contents[0].content
+    assert 'window.addEventListener("openai:set_globals"' in result.contents[0].content
+    assert "toolResponseMetadata" in result.contents[0].content
+    assert 'elapsedEl.textContent = `100 %' in result.contents[0].content
+    assert ".card.complete .progress-shell" not in result.contents[0].content
     assert "innerHTML" not in result.contents[0].content
 
 
