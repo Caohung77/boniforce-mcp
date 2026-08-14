@@ -83,7 +83,7 @@ def test_openapi_spec_served(app):
     assert r.status_code == 200
     spec = r.json()
     assert spec["openapi"].startswith("3.1")
-    assert spec["info"]["version"] == "1.0.3"
+    assert spec["info"]["version"] == "1.1.0"
     op_ids = {
         spec["paths"][p][m]["operationId"]
         for p in spec["paths"]
@@ -128,6 +128,15 @@ def test_openapi_spec_served(app):
     assert operation_descriptions
     assert all(len(description) <= 300 for description in operation_descriptions.values())
     job_schema = spec["components"]["schemas"]["JobStatus"]
+    assert {
+        "progress_stage",
+        "progress_message",
+        "elapsed_seconds",
+        "expected_duration_seconds",
+        "poll_after_seconds",
+    } <= job_schema["properties"].keys()
+    assert job_schema["properties"]["expected_duration_seconds"]["const"] == 120
+    assert job_schema["properties"]["poll_after_seconds"]["enum"] == [0, 30]
     assert job_schema["properties"]["report"]["oneOf"][0] == {
         "$ref": "#/components/schemas/Report"
     }
@@ -183,6 +192,37 @@ async def test_rest_create_report_accepts_search_result_id(app):
             )
     assert r.status_code == 200, r.text
     assert route.calls.last.request.content == b'{"search_result_id":"search-1"}'
+    payload = r.json()
+    assert payload["progress_stage"] == "queued"
+    assert "2 minutes" in payload["progress_message"]
+    assert payload["expected_duration_seconds"] == 120
+    assert payload["poll_after_seconds"] == 30
+    assert "wait=30" in payload["next_action"]
+
+
+def test_progress_text_advances_without_fake_percentages(monkeypatch):
+    from boniforce_mcp import rest_api
+
+    now = [100.0]
+    monkeypatch.setattr(rest_api.time, "monotonic", lambda: now[0])
+    rest_api._job_started_at.clear()
+
+    started = {"job_id": "progress-job", "status": "running"}
+    rest_api.annotate_job_outcome(started, "progress-job", "running")
+    assert started["progress_stage"] == "started"
+    assert "%" not in started["progress_message"]
+
+    now[0] = 165.0
+    analysing = {"job_id": "progress-job", "status": "running"}
+    rest_api.annotate_job_outcome(analysing, "progress-job", "running")
+    assert analysing["progress_stage"] == "analysing"
+    assert analysing["elapsed_seconds"] == 65
+
+    now[0] = 225.0
+    finalising = {"job_id": "progress-job", "status": "running"}
+    rest_api.annotate_job_outcome(finalising, "progress-job", "running")
+    assert finalising["progress_stage"] == "finalising"
+    assert finalising["poll_after_seconds"] == 30
 
 
 @pytest.mark.asyncio
@@ -219,6 +259,9 @@ async def test_completed_job_status_includes_report_score(app):
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["done"] is True
+    assert payload["progress_stage"] == "completed"
+    assert payload["progress_message"] == "✅ Boniscore report ready."
+    assert payload["poll_after_seconds"] == 0
     assert payload["report"]["score"] == 84
     assert "Read report.score" in payload["next_action"]
 

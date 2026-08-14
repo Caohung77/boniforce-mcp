@@ -11,6 +11,7 @@ the call is proxied to api.boniforce.de.
 """
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import jwt
@@ -196,6 +197,59 @@ def _company_query_params(request: Request) -> dict[str, str]:
 # ---------------- job-status helpers (shared with MCP server.py) ----------------
 
 TERMINAL_JOB_STATUSES = frozenset({"completed", "finished", "failed", "error"})
+REPORT_STATUS_POLL_SECONDS = 30
+EXPECTED_REPORT_DURATION_SECONDS = 120
+MAX_REPORT_WAIT_SECONDS = 180
+_job_started_at: dict[str, float] = {}
+
+
+def _job_elapsed_seconds(job_id: str) -> int:
+    """Return best-effort elapsed time for user-facing progress copy."""
+    now = time.monotonic()
+    if len(_job_started_at) >= 1_000:
+        stale_before = now - 3_600
+        stale_jobs = [
+            known_job_id
+            for known_job_id, started_at in _job_started_at.items()
+            if started_at < stale_before
+        ]
+        for known_job_id in stale_jobs:
+            _job_started_at.pop(known_job_id, None)
+    started_at = _job_started_at.setdefault(job_id, now)
+    return max(0, int(now - started_at))
+
+
+def _job_progress_text(status: str, elapsed_seconds: int) -> tuple[str, str]:
+    """Map real status + elapsed time to honest, non-percentage progress copy."""
+    if status in ("completed", "finished"):
+        return "completed", "✅ Boniscore report ready."
+    if status in ("failed", "error"):
+        return "failed", "❌ Boniscore report generation failed."
+    if status == "queued":
+        return (
+            "queued",
+            "⏳ Boniscore report queued. Typical completion time is about 2 minutes.",
+        )
+    if elapsed_seconds < 30:
+        return (
+            "started",
+            "⏳ Boniscore report started. Typical completion time is about 2 minutes.",
+        )
+    if elapsed_seconds < 60:
+        return "processing", "🔍 Register data is being collected and checked."
+    if elapsed_seconds < 90:
+        return "analysing", "📊 Financial and risk data are being analysed."
+    if elapsed_seconds < 120:
+        return "calculating", "🧮 The Boniscore is being calculated."
+    if elapsed_seconds < MAX_REPORT_WAIT_SECONDS:
+        return (
+            "finalising",
+            "⏳ The report is being finalised and is taking slightly longer than usual.",
+        )
+    return (
+        "delayed",
+        "⏳ The report is still processing and is taking longer than usual.",
+    )
 
 
 def annotate_job_outcome(
@@ -205,21 +259,31 @@ def annotate_job_outcome(
     ``next_action`` fields so the model knows whether to keep polling.
 
     The model (ChatGPT Action / Claude tool call) only sees one HTTP response
-    per call. ChatGPT's per-call timeout is ~45s and our long-poll caps at 40s,
-    so reports >40s need 2-3 sequential calls. ``next_action`` makes both the
-    polling loop and the final score-reading step explicit.
+    per call. ChatGPT's per-call timeout is ~45s, so the GPT uses 30-second
+    polls during the typical 120-second report window. ``next_action`` makes
+    both the visible text update and final score-reading step explicit.
     """
     if not isinstance(payload, dict):
         return payload
-    status_str = (status_value or "").lower().strip()
+    payload_status = payload.get("status")
+    status_str = (status_value or payload_status or "").lower().strip()
     done = status_str in TERMINAL_JOB_STATUSES
     payload["done"] = done
     jid = job_id or payload.get("job_id") or "<job_id>"
+    elapsed_seconds = _job_elapsed_seconds(jid)
+    progress_stage, progress_message = _job_progress_text(
+        status_str, elapsed_seconds
+    )
+    payload["progress_stage"] = progress_stage
+    payload["progress_message"] = progress_message
+    payload["elapsed_seconds"] = elapsed_seconds
+    payload["expected_duration_seconds"] = EXPECTED_REPORT_DURATION_SECONDS
+    payload["poll_after_seconds"] = 0 if done else REPORT_STATUS_POLL_SECONDS
     if status_str in ("completed", "finished"):
         report_id = payload.get("report_id")
         if isinstance(payload.get("report"), dict):
             payload["next_action"] = (
-                "Report completed. Read report.score for the Boniscore, then "
+                "Show progress_message to the user. Read report.score for the Boniscore, then "
                 "report.credit_limit and report.credit_assessment_result."
             )
         elif report_id:
@@ -235,9 +299,9 @@ def annotate_job_outcome(
             )
     elif not done:
         payload["next_action"] = (
-            f"Job not finished yet (status={status_str or 'unknown'}). "
-            f"Call get_job_status again with job_id={jid} and wait_seconds=40. "
-            "Keep calling until done=true (typically 1-3 calls, max ~120s total)."
+            "Show progress_message to the user now. Then call getJobStatus again "
+            f"with job_id={jid} and wait=30. Continue until done=true; expect about "
+            "4 polls/120 seconds and allow up to 6 polls/180 seconds."
         )
     return payload
 
@@ -336,6 +400,8 @@ async def create_report(request: Request) -> Response:
         )
     except Exception as exc:
         return _err(502, f"Boniforce upstream: {exc}")
+    if isinstance(data, dict) and data.get("job_id"):
+        _job_elapsed_seconds(data["job_id"])
     # Optional inline wait: ?wait=N seconds (max 40). When set, we poll
     # get_job_status server-side and additionally fetch the finished report
     # so the caller gets a one-shot answer instead of needing to poll.
@@ -662,7 +728,7 @@ def _openapi_spec() -> dict[str, Any]:
         "openapi": "3.1.0",
         "info": {
             "title": "Boniforce REST API (for ChatGPT Custom GPTs)",
-            "version": "1.0.3",
+            "version": "1.1.0",
             "description": (
                 "Per-user proxy for the Boniforce credit-data API. Authenticate "
                 "via OAuth 2.1 with the Boniforce MCP authorization server "
@@ -677,7 +743,10 @@ def _openapi_spec() -> dict[str, Any]:
                 "a 30-120s computation that returns the same data.\n"
                 "1. Only if no fresh report exists: GET /api/v1/search (then "
                 "/search/advanced only if needed) → POST /api/v1/reports using "
-                "search_result_id → poll GET /api/v1/jobs/{id}/status?wait=40. "
+                "search_result_id without wait. Show progress_message immediately, "
+                "then poll GET /api/v1/jobs/{id}/status?wait=30 and show each new "
+                "progress_message before polling again. Typical duration is 120s; "
+                "allow up to 6 polls/180s. "
                 "When done=true, read the Boniscore from report.score. If report "
                 "is absent, immediately call GET /api/v1/reports/{report_id}; a "
                 "completed job status alone is not the credit report.\n"
@@ -774,7 +843,7 @@ def _openapi_spec() -> dict[str, Any]:
                                 "True if the job reached a terminal state "
                                 "(completed/finished/failed/error). False means "
                                 "the caller MUST call this endpoint again with "
-                                "?wait=40 to keep waiting."
+                                "?wait=30 to keep waiting."
                             ),
                         },
                         "next_action": {
@@ -784,6 +853,41 @@ def _openapi_spec() -> dict[str, Any]:
                                 "when done=false; when completed, read report.score "
                                 "or call getReport if report is absent."
                             ),
+                        },
+                        "progress_stage": {
+                            "type": "string",
+                            "enum": [
+                                "started",
+                                "queued",
+                                "processing",
+                                "analysing",
+                                "calculating",
+                                "finalising",
+                                "delayed",
+                                "completed",
+                                "failed",
+                            ],
+                            "description": "Current user-facing processing stage.",
+                        },
+                        "progress_message": {
+                            "type": "string",
+                            "description": (
+                                "Display this text to the user before the next poll."
+                            ),
+                        },
+                        "elapsed_seconds": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Best-effort elapsed processing time.",
+                        },
+                        "expected_duration_seconds": {
+                            "type": "integer",
+                            "const": 120,
+                        },
+                        "poll_after_seconds": {
+                            "type": "integer",
+                            "enum": [0, 30],
+                            "description": "Zero when done; otherwise poll after 30s.",
                         },
                         "report": {
                             "description": (
@@ -1355,20 +1459,26 @@ def _openapi_spec() -> dict[str, Any]:
                 "post": {
                     "operationId": "createReport",
                     "x-openai-isConsequential": False,
-                    "summary": "Start Boniscore report. Pass ?wait=40 to long-poll up to 40s.",
+                    "summary": "Start Boniscore report and return text progress immediately.",
                     "description": (
-                        "Costs 75 credits. Use search_result_id or all register fields. "
-                        "With wait=40, waits up to 40s. If done=false, call "
-                        "getJobStatus again with wait=40 (up to 3 calls). When done=true, "
-                        "read report.score; if report is absent, call getReport with report_id."
+                        "Costs 75 credits. Omit wait so progress_message appears immediately. "
+                        "Show that message, then call getJobStatus with wait=30 until done=true "
+                        "(typically 4 polls/120s; up to 6/180s). Read report.score when ready."
                     ),
                     "parameters": [
                         {
                             "in": "query",
                             "name": "wait",
                             "required": False,
-                            "schema": {"type": "integer", "minimum": 0, "maximum": 40},
-                            "description": "Seconds to wait server-side for the report to finish (0-40).",
+                            "schema": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 40,
+                                "default": 0,
+                            },
+                            "description": (
+                                "Compatibility option. Omit for immediate GPT progress text."
+                            ),
                         }
                     ],
                     "requestBody": {
@@ -1480,12 +1590,11 @@ def _openapi_spec() -> dict[str, Any]:
             "/api/v1/jobs/{job_id}/status": {
                 "get": {
                     "operationId": "getJobStatus",
-                    "summary": "Poll report job. Pass ?wait=40 to long-poll up to 40s.",
+                    "summary": "Poll report job and return the next text progress update.",
                     "description": (
-                        "Poll until done=true using wait=40 (up to 3 calls). Completed "
-                        "responses normally include the credit report; read report.score. "
-                        "If report is absent, call getReport with report_id before answering. "
-                        "Failed jobs include error_message."
+                        "Use wait=30 until done=true. Show progress_message after each response "
+                        "before polling again. Expect about 4 polls/120s; allow up to 6/180s. "
+                        "When complete, read report.score or call getReport if report is absent."
                     ),
                     "parameters": [
                         {
@@ -1498,8 +1607,13 @@ def _openapi_spec() -> dict[str, Any]:
                             "in": "query",
                             "name": "wait",
                             "required": False,
-                            "schema": {"type": "integer", "minimum": 0, "maximum": 40},
-                            "description": "Seconds to wait server-side for status change (0-40).",
+                            "schema": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 40,
+                                "default": 30,
+                            },
+                            "description": "Use 30 seconds for visible GPT progress updates.",
                         },
                     ],
                     "responses": {
