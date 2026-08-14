@@ -662,7 +662,7 @@ def _openapi_spec() -> dict[str, Any]:
         "openapi": "3.1.0",
         "info": {
             "title": "Boniforce REST API (for ChatGPT Custom GPTs)",
-            "version": "1.0.1",
+            "version": "1.0.2",
             "description": (
                 "Per-user proxy for the Boniforce credit-data API. Authenticate "
                 "via OAuth 2.1 with the Boniforce MCP authorization server "
@@ -1356,13 +1356,10 @@ def _openapi_spec() -> dict[str, Any]:
                     "operationId": "createReport",
                     "summary": "Start Boniscore report. Pass ?wait=40 to long-poll up to 40s.",
                     "description": (
-                        "Costs 75 credits. Identify the company with search_result_id or "
-                        "all register fields. With ?wait=40 the server long-polls up "
-                        "to 40s and inlines the finished report. Reports take 30-120s — if "
-                        "done=false, immediately call getJobStatus with ?wait=40 and repeat "
-                        "(max 3 calls) until done=true. When done=true, read report.score. "
-                        "If report is absent, call getReport with report_id before answering. "
-                        "Never reply 'still processing' before 3 calls."
+                        "Costs 75 credits. Use search_result_id or all register fields. "
+                        "With wait=40, waits up to 40s. If done=false, call "
+                        "getJobStatus again with wait=40 (up to 3 calls). When done=true, "
+                        "read report.score; if report is absent, call getReport with report_id."
                     ),
                     "parameters": [
                         {
@@ -1484,13 +1481,10 @@ def _openapi_spec() -> dict[str, Any]:
                     "operationId": "getJobStatus",
                     "summary": "Poll report job. Pass ?wait=40 to long-poll up to 40s.",
                     "description": (
-                        "Returns latest job status (queued -> running -> completed/failed). "
-                        "With ?wait=40 the server long-polls up to 40s. Response has done=true "
-                        "(terminal) or done=false + next_action (still running — call again "
-                        "with ?wait=40). On successful completion, the response includes the "
-                        "credit report and Boniscore at report.score. If report is absent, "
-                        "call getReport with report_id before answering. Loop until done=true; "
-                        "max 3 calls before treating the job as stuck."
+                        "Poll until done=true using wait=40 (up to 3 calls). Completed "
+                        "responses normally include the credit report; read report.score. "
+                        "If report is absent, call getReport with report_id before answering. "
+                        "Failed jobs include error_message."
                     ),
                     "parameters": [
                         {

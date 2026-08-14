@@ -83,7 +83,7 @@ def test_openapi_spec_served(app):
     assert r.status_code == 200
     spec = r.json()
     assert spec["openapi"].startswith("3.1")
-    assert spec["info"]["version"] == "1.0.1"
+    assert spec["info"]["version"] == "1.0.2"
     op_ids = {
         spec["paths"][p][m]["operationId"]
         for p in spec["paths"]
@@ -114,6 +114,15 @@ def test_openapi_spec_served(app):
     ]["application/json"]["schema"]
     assert "search_result_id" in create_schema["properties"]
     assert "required" not in create_schema
+    operation_descriptions = {
+        operation["operationId"]: operation["description"]
+        for path_item in spec["paths"].values()
+        for method, operation in path_item.items()
+        if method in {"get", "post", "put", "patch", "delete"}
+        and "description" in operation
+    }
+    assert operation_descriptions
+    assert all(len(description) <= 300 for description in operation_descriptions.values())
     job_schema = spec["components"]["schemas"]["JobStatus"]
     assert job_schema["properties"]["report"]["oneOf"][0] == {
         "$ref": "#/components/schemas/Report"
