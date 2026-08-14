@@ -106,6 +106,26 @@ own Boniforce API key during the GPT's OAuth flow — full per-user
 isolation. See the *For developers* section of the GitHub README for
 setup commands.
 
+### Text progress in a Custom GPT
+
+Custom GPT Actions use text updates rather than the MCP connector's live app
+card. OpenAPI schema version **1.1.0** returns an immediate progress message,
+then guides ChatGPT to check the job every 30 seconds. A typical report takes
+about 120 seconds; processing may continue for up to 180 seconds before the
+status changes to delayed.
+
+The messages describe real stages such as collecting register data, analysing
+financial and risk data, calculating the Boniscore, and finalising the report.
+They intentionally avoid made-up percentage values. When processing finishes,
+the response includes the report whenever available so ChatGPT can read and
+present the Boniscore directly.
+
+ChatGPT controls whether every intermediate Action response is displayed or
+combined. For the native live card and progress bar, use the MCP connector.
+
+Existing GPT builders should re-import
+`https://mcp.boniforce.de/api/openapi.json`, save the GPT, and start a new chat.
+
 ---
 
 ## What you can ask
@@ -138,7 +158,7 @@ want in German or English.
 | `list_reports` | Reports you have already generated |
 | `create_report` | Start a Boniscore report (write tool — initiates Bundesanzeiger fetch) |
 | `get_report` | Boniscore, credit limit, APPROVE / REVIEW / DECLINE verdict |
-| `get_job_status` | Poll a long-running report job (30–120 s typical) |
+| `get_job_status` | Poll a long-running report job (about 120 s typical) |
 | `get_financial_data` | Direct financial statements (25 credits) |
 | `get_financial_analysis` | Direct financial score + ratios (50 credits) |
 | `get_report_financial_data` | Per-year balance-sheet data |
@@ -169,11 +189,11 @@ Sector keys: `automotive`, `healthcare`, `construction`,
 
 ## How long does a credit check take?
 
-A new Boniscore report typically completes in **30–120 seconds** — the
-system pulls and analyses the latest Bundesanzeiger annual filing on
-demand. The assistant polls automatically and tells you when the report
-is ready. For follow-up questions on the same company within the same
-session, the report is reused (no second fetch).
+A new Boniscore report typically completes in **about 120 seconds** — the
+system pulls and analyses the latest Bundesanzeiger annual filing on demand.
+The assistant checks every 30 seconds and can continue for up to 180 seconds
+when processing takes longer than usual. For follow-up questions on the same
+company within the same session, the report is reused (no second fetch).
 
 ---
 
@@ -210,9 +230,9 @@ S&P Global PMI, Eurostat, and Bundesbank.
 Custom MCP connectors are paid-tier features on both platforms.
 
 **What if the report does not finish?**
-After ~120 s the assistant reports an unusual delay and stops polling.
-Retrying usually succeeds; if it persists, the Boniforce backend may
-have rejected the filing.
+After 120 seconds the assistant reports that finalisation is taking longer
+than usual and may keep checking through 180 seconds. If the report is still
+delayed, retrying usually succeeds; if it persists, contact Boniforce support.
 
 ---
 
@@ -248,4 +268,4 @@ recipes live in the GitHub repository:
 
 ---
 
-*Last updated: 2026-05-12. Connector version: 0.3.1.*
+*Last updated: 2026-08-14. Connector version: 0.6.0. Custom GPT Actions schema: 1.1.0.*

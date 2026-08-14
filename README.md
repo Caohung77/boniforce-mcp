@@ -5,8 +5,9 @@
 Ask ChatGPT or Claude *"What's the Boniscore of Müller GmbH — and how is the
 construction sector doing?"* and get a real answer — pulled live from
 [Boniforce](https://api.boniforce.de) and
-[Sectorbench](https://sectorbench.theaiwhisperer.cloud) — in seconds. No
-tab-switching, no copy-paste, no extra logins.
+[Sectorbench](https://sectorbench.theaiwhisperer.cloud) — without leaving the
+conversation. New Boniscore reports typically take about two minutes while
+Boniforce collects and analyses the source data.
 
 ---
 
@@ -164,6 +165,27 @@ you can wire it into a Custom GPT's *Aktionen* panel.
 
 3. Save → publish (Nur ich / Mit Link / Öffentlich).
 
+#### Text progress in a Custom GPT
+
+Custom GPT Actions use text updates rather than the live MCP app card. Schema
+version **1.1.0** is designed around the typical 120-second report time:
+
+- `createReport` returns immediately with a `progress_message`.
+- `getJobStatus` checks again every 30 seconds and returns the next honest
+  stage: queued, started, processing, analysing, calculating, or finalising.
+- Most reports need about four checks over 120 seconds. The GPT may continue
+  for up to six checks over 180 seconds before describing the report as
+  delayed.
+- Completed responses include the report whenever available, so the GPT can
+  read `report.score` and present the Boniscore without another manual step.
+
+ChatGPT controls how intermediate Action responses are rendered and may
+occasionally combine text updates. Native progress cards and progress bars are
+available through the MCP connector; Custom GPT Actions support text only.
+
+If this Action was configured before schema version 1.1.0, re-import
+`https://mcp.boniforce.de/api/openapi.json`, save the GPT, and start a new chat.
+
 **Branch-level sector data** for 10 German industries (automotive,
 construction, healthcare, fintech, …) — current health scores, 12-month
 score history, AI-summarised monthly news reports, and Destatis insolvency
@@ -235,9 +257,10 @@ Log in to your Boniforce dashboard. The key starts with `sk_live-…`. If you
 don't have one yet, contact your Boniforce admin.
 
 **How long does a credit check take?**
-A new report typically completes in **30–120 seconds** (the system pulls and
-analyses Bundesanzeiger filings on demand). The model polls automatically
-and tells you when it's ready.
+A new report typically completes in **about 120 seconds** because Boniforce
+pulls and analyses Bundesanzeiger filings on demand. The GPT checks every
+30 seconds and can continue for up to 180 seconds when processing takes longer
+than usual.
 
 **Will my chat history be sent to Boniforce?**
 No. The model only sends Boniforce the company identifiers it needs (name +

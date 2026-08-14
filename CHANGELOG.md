@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Add staged text progress for Custom GPT Actions: report creation returns
+  immediately, status checks default to 30 seconds, the normal expectation is
+  120 seconds, and delayed processing remains visible through 180 seconds.
+- Document the difference between MCP live progress cards and Custom GPT text
+  updates, including the OpenAPI 1.1.0 re-import instructions for GPT builders.
 - Add a standards-based MCP App for `create_report` that renders a live
   Boniscore progress card in ChatGPT, polls the existing status tool, and
   displays the score, assessment, and credit limit when the report completes.
