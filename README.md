@@ -89,11 +89,11 @@ Then start a new conversation and ask:
 The plugin package is in
 [`plugins/boniforce-credit-check`](plugins/boniforce-credit-check), and a
 ready-to-upload archive is available as
-[`releases/boniforce-credit-check-plugin-0.3.1.zip`](releases/boniforce-credit-check-plugin-0.3.1.zip).
+[`releases/boniforce-credit-check-plugin-0.3.2.zip`](releases/boniforce-credit-check-plugin-0.3.2.zip).
 
 **Standalone skill.** Users who already connected the Boniforce MCP can
 download
-[`releases/boniforce-credit-check-skill-0.3.1.zip`](releases/boniforce-credit-check-skill-0.3.1.zip)
+[`releases/boniforce-credit-check-skill-0.3.2.zip`](releases/boniforce-credit-check-skill-0.3.2.zip)
 and extract the `boniforce-credit-check` folder into
 `$HOME/.agents/skills/`. Restart Codex if the skill does not appear.
 

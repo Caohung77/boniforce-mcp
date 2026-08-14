@@ -78,6 +78,23 @@ def test_plugin_skill_shows_current_report_cost():
     assert "Do not spend a credit" not in skill
 
 
+def test_plugin_release_uses_server_progress_without_duplicate_narration():
+    import json
+
+    root = Path(__file__).resolve().parents[1]
+    plugin_dir = root / "plugins" / "boniforce-credit-check"
+    manifest = json.loads(
+        (plugin_dir / ".codex-plugin" / "plugin.json").read_text()
+    )
+    skill = (
+        plugin_dir / "skills" / "boniforce-credit-check" / "SKILL.md"
+    ).read_text()
+
+    assert manifest["version"] == "0.3.2"
+    assert "MCP server's localized progress notifications" in skill
+    assert "Do not add assistant-authored polling updates" in skill
+
+
 def test_plugin_skill_requires_sector_aware_decision_brief():
     root = Path(__file__).resolve().parents[1]
     skill_dir = (

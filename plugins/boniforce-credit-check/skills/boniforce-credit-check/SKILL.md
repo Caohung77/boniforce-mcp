@@ -35,6 +35,7 @@ Use the Boniforce MCP tools to produce evidence-based, decision-ready company br
 ### 2. Complete the report
 
 - Immediately before calling `create_report`, send exactly one concise user-facing status update in the user's language. In German use: `Ich erstelle den aktuellen Bericht. Die Verarbeitung kann bis zu 120 Sekunden dauern.` Do not mention tools, workflow steps, polling, or internal processing. Do not send this notice when reusing an existing report.
+- During report generation, rely on the MCP server's localized progress notifications when the client renders them. Do not add assistant-authored polling updates or repeat the waiting notice. If the client does not render progress notifications, continue the polling workflow silently until the report completes or all allowed polls are exhausted.
 - Call `create_report` once using `search_result_id` when available and `wait_seconds=40`.
 - If `done=false`, call `get_job_status` with the same `job_id` and `wait_seconds=40`, up to two more times in the same turn.
 - Use the inlined report when available; otherwise call `get_report` after completion. Never start a replacement report because polling is slow.
