@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -15,6 +16,9 @@ from .config import get_settings
 
 
 logger = logging.getLogger(__name__)
+
+
+JobProgressCallback = Callable[[int, float, str], Awaitable[None]]
 
 
 class BoniforceError(RuntimeError):
@@ -148,17 +152,27 @@ class BoniforceClient:
         return await self._request("GET", f"/v1/jobs/{job_id}/status", token)
 
     async def wait_for_job(
-        self, token: str, job_id: str, max_wait_s: float = 40.0, poll_every_s: float = 2.0
+        self,
+        token: str,
+        job_id: str,
+        max_wait_s: float = 40.0,
+        poll_every_s: float = 2.0,
+        on_progress: JobProgressCallback | None = None,
     ) -> Any:
         """Poll get_job_status until terminal state or max_wait_s exceeded."""
         import asyncio
-        import time
 
-        deadline = time.monotonic() + max_wait_s
+        started = time.monotonic()
+        deadline = started + max_wait_s
         last = None
+        poll_count = 0
         while True:
             last = await self.get_job_status(token, job_id)
             status = (last or {}).get("status", "").lower()
+            poll_count += 1
+            elapsed_s = min(max_wait_s, time.monotonic() - started)
+            if on_progress is not None:
+                await on_progress(poll_count, elapsed_s, status)
             if status in ("completed", "finished", "failed", "error"):
                 return last
             if time.monotonic() >= deadline:

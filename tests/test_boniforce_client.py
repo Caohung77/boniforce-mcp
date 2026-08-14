@@ -89,6 +89,41 @@ async def test_create_report_accepts_search_result_id(respx_mock):
     assert route.calls.last.request.content == b'{"search_result_id":"search-1"}'
 
 
+@pytest.mark.asyncio
+@respx.mock(assert_all_called=False)
+async def test_wait_for_job_reports_each_poll(respx_mock):
+    route = respx_mock.get("https://api.boniforce.de/v1/jobs/j1/status").mock(
+        side_effect=[
+            httpx.Response(200, json={"status": "running"}),
+            httpx.Response(200, json={"status": "completed"}),
+        ]
+    )
+    updates = []
+
+    async def capture_progress(poll_count, elapsed_s, status):
+        updates.append((poll_count, elapsed_s, status))
+
+    client = BoniforceClient()
+    try:
+        result = await client.wait_for_job(
+            "tok",
+            "j1",
+            max_wait_s=1,
+            poll_every_s=0,
+            on_progress=capture_progress,
+        )
+    finally:
+        await client.aclose()
+
+    assert result == {"status": "completed"}
+    assert route.call_count == 2
+    assert [(poll_count, status) for poll_count, _, status in updates] == [
+        (1, "running"),
+        (2, "completed"),
+    ]
+    assert all(elapsed_s >= 0 for _, elapsed_s, _ in updates)
+
+
 @pytest.mark.parametrize(
     ("method_name", "path"),
     [

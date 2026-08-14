@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.server.dependencies import get_access_token
@@ -56,6 +56,21 @@ def _sectorbench_client_from_state() -> SectorbenchClient:
 
 
 _client_holder: dict[str, Any] = {}
+
+
+def _boniscore_progress_message(status: str, elapsed_s: float) -> str:
+    """Return a concise German status line for report-generation progress."""
+    seconds = max(0, round(elapsed_s))
+    status = status.lower()
+    if status in {"completed", "finished"}:
+        return "Der Boniscore-Bericht ist fertig."
+    if status in {"failed", "error"}:
+        return "Die Boniscore-Berechnung ist fehlgeschlagen."
+    if status in {"queued", "pending"}:
+        return f"Der Boniscore-Bericht ist eingeplant – {seconds} Sekunden vergangen."
+    if status in {"running", "processing", "in_progress"}:
+        return f"Der Boniscore wird berechnet – {seconds} Sekunden vergangen."
+    return f"Der Boniscore-Bericht wird erstellt – {seconds} Sekunden vergangen."
 
 
 _SECTORBENCH_WZ_CORE: tuple[tuple[str, set[int]], ...] = (
@@ -384,6 +399,7 @@ def _make_mcp() -> FastMCP:
         }
     )
     async def create_report(
+        ctx: Context,
         company_name: str | None = None,
         register_type: str | None = None,
         register_number: str | None = None,
@@ -415,6 +431,19 @@ def _make_mcp() -> FastMCP:
         _validate_company_identifier(
             search_result_id, register_type, register_number, register_court
         )
+        progress = 0
+
+        async def report_progress(message: str) -> None:
+            nonlocal progress
+            await ctx.report_progress(progress=progress, message=message)
+            progress += 1
+
+        async def report_poll_progress(
+            _poll_count: int, elapsed_s: float, status: str
+        ) -> None:
+            await report_progress(_boniscore_progress_message(status, elapsed_s))
+
+        await report_progress("Der Boniscore-Bericht wird angefordert …")
         _, token = await _user_token()
         client = _bf_client_from_state()
         try:
@@ -432,13 +461,20 @@ def _make_mcp() -> FastMCP:
         ws = max(0, min(40, wait_seconds))
         status_value: str | None = None
         if ws and data.get("job_id"):
+            await report_progress("Die Boniscore-Berechnung wurde gestartet …")
             try:
-                status = await client.wait_for_job(token, data["job_id"], max_wait_s=ws)
+                status = await client.wait_for_job(
+                    token,
+                    data["job_id"],
+                    max_wait_s=ws,
+                    on_progress=report_poll_progress,
+                )
                 data["final_status"] = status
                 status_value = (status or {}).get("status")
                 if (status_value or "").lower() in ("completed", "finished") and data.get(
                     "report_id"
                 ):
+                    await report_progress("Der fertige Boniscore-Bericht wird geladen …")
                     data["report"] = await client.get_report(token, data["report_id"])
             except BoniforceError as e:
                 raise _wrap(e)
@@ -475,7 +511,9 @@ def _make_mcp() -> FastMCP:
             "openWorldHint": False,
         }
     )
-    async def get_job_status(job_id: str, wait_seconds: int = 40) -> Any:
+    async def get_job_status(
+        ctx: Context, job_id: str, wait_seconds: int = 40
+    ) -> Any:
         """Step 3 of Boniscore workflow: poll a report-generation job. status
         moves queued -> running -> completed (or failed). Typical time 30-120s.
         Default wait_seconds=40 long-polls server-side. The response includes
@@ -486,9 +524,31 @@ def _make_mcp() -> FastMCP:
         _, token = await _user_token()
         ws = max(0, min(40, wait_seconds))
         client = _bf_client_from_state()
+        progress = 0
+
+        async def report_poll_progress(
+            _poll_count: int, elapsed_s: float, status: str
+        ) -> None:
+            nonlocal progress
+            await ctx.report_progress(
+                progress=progress,
+                message=_boniscore_progress_message(status, elapsed_s),
+            )
+            progress += 1
+
         try:
             if ws:
-                data = await client.wait_for_job(token, job_id, max_wait_s=ws)
+                await ctx.report_progress(
+                    progress=progress,
+                    message="Der Status des Boniscore-Berichts wird geprüft …",
+                )
+                progress += 1
+                data = await client.wait_for_job(
+                    token,
+                    job_id,
+                    max_wait_s=ws,
+                    on_progress=report_poll_progress,
+                )
             else:
                 data = await client.get_job_status(token, job_id)
         except BoniforceError as e:

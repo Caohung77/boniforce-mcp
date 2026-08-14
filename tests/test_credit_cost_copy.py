@@ -34,12 +34,29 @@ async def test_mcp_exposes_current_boniforce_tool_surface():
     assert len(names) == 23
     create_report = next(tool for tool in tools if tool.name == "create_report")
     assert "search_result_id" in create_report.parameters["properties"]
+    assert "ctx" not in create_report.parameters["properties"]
     assert not {
         "company_name",
         "register_type",
         "register_number",
         "register_court",
     } & set(create_report.parameters.get("required", []))
+    get_job_status = next(tool for tool in tools if tool.name == "get_job_status")
+    assert "ctx" not in get_job_status.parameters["properties"]
+
+
+def test_boniscore_progress_messages_are_german():
+    from boniforce_mcp.server import _boniscore_progress_message
+
+    assert _boniscore_progress_message("queued", 4.2) == (
+        "Der Boniscore-Bericht ist eingeplant – 4 Sekunden vergangen."
+    )
+    assert _boniscore_progress_message("running", 12.8) == (
+        "Der Boniscore wird berechnet – 13 Sekunden vergangen."
+    )
+    assert _boniscore_progress_message("completed", 30) == (
+        "Der Boniscore-Bericht ist fertig."
+    )
 
 
 def test_plugin_skill_shows_current_report_cost():
