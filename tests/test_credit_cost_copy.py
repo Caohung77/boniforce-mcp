@@ -19,6 +19,7 @@ def test_mcp_instructions_show_current_report_cost():
 @pytest.mark.asyncio
 async def test_mcp_exposes_current_boniforce_tool_surface():
     from boniforce_mcp.server import _make_mcp
+    from boniforce_mcp.progress_ui import BONISCORE_PROGRESS_UI_URI
 
     tools = await _make_mcp().list_tools(run_middleware=False)
     names = {tool.name for tool in tools}
@@ -42,15 +43,56 @@ async def test_mcp_exposes_current_boniforce_tool_surface():
         "register_court",
     } & set(create_report.parameters.get("required", []))
     get_job_status = next(tool for tool in tools if tool.name == "get_job_status")
+    get_report = next(tool for tool in tools if tool.name == "get_report")
     assert "ctx" not in get_job_status.parameters["properties"]
-    assert create_report.meta == {
-        "openai/toolInvocation/invoking": "Boniscore-Bericht wird erstellt …",
-        "openai/toolInvocation/invoked": "Boniscore-Anfrage abgeschlossen",
+    assert create_report.parameters["properties"]["wait_seconds"]["default"] == 0
+    assert create_report.meta["ui"] == {
+        "resourceUri": BONISCORE_PROGRESS_UI_URI,
+        "visibility": ["model", "app"],
     }
-    assert get_job_status.meta == {
-        "openai/toolInvocation/invoking": "Boniscore-Berechnung läuft …",
-        "openai/toolInvocation/invoked": "Boniscore-Status aktualisiert",
-    }
+    assert create_report.meta["openai/outputTemplate"] == BONISCORE_PROGRESS_UI_URI
+    assert create_report.meta["openai/widgetAccessible"] is True
+    assert create_report.meta["openai/toolInvocation/invoking"] == (
+        "Boniscore-Bericht wird erstellt …"
+    )
+    assert create_report.meta["openai/toolInvocation/invoked"] == (
+        "Boniscore-Anfrage abgeschlossen"
+    )
+    assert get_job_status.meta["ui"]["visibility"] == ["model", "app"]
+    assert get_job_status.meta["openai/widgetAccessible"] is True
+    assert get_job_status.meta["openai/toolInvocation/invoking"] == (
+        "Boniscore-Berechnung läuft …"
+    )
+    assert get_job_status.meta["openai/toolInvocation/invoked"] == (
+        "Boniscore-Status aktualisiert"
+    )
+    assert get_report.meta["ui"]["visibility"] == ["model", "app"]
+    assert get_report.meta["openai/widgetAccessible"] is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_exposes_live_boniscore_progress_app():
+    from boniforce_mcp.progress_ui import (
+        BONISCORE_PROGRESS_HTML,
+        BONISCORE_PROGRESS_UI_URI,
+    )
+    from boniforce_mcp.server import _make_mcp
+
+    mcp = _make_mcp()
+    resources = await mcp.list_resources(run_middleware=False)
+    resource = next(item for item in resources if str(item.uri) == BONISCORE_PROGRESS_UI_URI)
+    assert resource.mime_type == "text/html;profile=mcp-app"
+    assert resource.meta["ui"]["prefersBorder"] is True
+
+    result = await mcp.read_resource(BONISCORE_PROGRESS_UI_URI, run_middleware=False)
+    assert len(result.contents) == 1
+    assert result.contents[0].mime_type == "text/html;profile=mcp-app"
+    assert result.contents[0].content == BONISCORE_PROGRESS_HTML
+    assert "Boniscore-Bericht gestartet" in result.contents[0].content
+    assert 'bridgeRequest("tools/call"' in result.contents[0].content
+    assert 'callTool("get_job_status"' in result.contents[0].content
+    assert 'callTool("get_report"' in result.contents[0].content
+    assert "innerHTML" not in result.contents[0].content
 
 
 def test_boniscore_progress_messages_are_german():
@@ -100,6 +142,7 @@ def test_plugin_release_uses_server_progress_without_duplicate_narration():
 
     assert manifest["version"] == "0.3.2"
     assert "MCP server's localized progress notifications" in skill
+    assert "live MCP App progress card" in skill
     assert "Do not add assistant-authored polling updates" in skill
 
 

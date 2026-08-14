@@ -93,6 +93,10 @@ Mode:
      auto-discovery handles it)
 5. Save → paste your Boniforce API key in the popup.
 
+For a newly created report, ChatGPT displays a live Boniforce card immediately.
+The card updates while the report is queued and calculated, then shows the
+Boniscore, assessment, and credit limit. The normal ChatGPT answer still follows.
+
 ## Build a public Custom GPT (per-user keys)
 
 The same server exposes a REST mirror at

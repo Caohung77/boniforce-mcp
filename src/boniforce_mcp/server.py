@@ -33,6 +33,7 @@ from pathlib import Path
 from . import auth, rest_api, storage
 from .boniforce_client import BoniforceClient, BoniforceError
 from .config import get_settings
+from .progress_ui import BONISCORE_PROGRESS_HTML, BONISCORE_PROGRESS_UI_URI
 from .rest_api import SECTORBENCH_BRANCH_KEYS, annotate_job_outcome
 from .sectorbench_client import SectorbenchClient, SectorbenchError
 
@@ -189,8 +190,8 @@ def _make_mcp() -> FastMCP:
             "     failed/error.\n"
             "  1. search_companies(query) -> get register fields + search_result_id. If it\n"
             "     returns no match, use search_companies_advanced(query) as the fallback.\n"
-            "  2. create_report(...) with wait_seconds=40 (default) -> response often already\n"
-            "     contains `report` with the finished Boniscore. Check the `done` field.\n"
+            "  2. create_report(...) with wait_seconds=0 (default) -> starts the job immediately\n"
+            "     and opens a live progress card in compatible MCP Apps clients. Check `done`.\n"
             "     ⚠️ COSTS 75 CREDITS per call and takes 30-120s — see step 0 first.\n"
             "  3. If done=false, call get_job_status(job_id, wait_seconds=40). Repeat until\n"
             "     done=true. See LOOP RULE below.\n"
@@ -210,12 +211,13 @@ def _make_mcp() -> FastMCP:
             "  list_reports is account-wide and persists across chats. Step 0 catches this\n"
             "  case automatically — always run it before considering create_report.\n\n"
             "LOOP RULE — long-running jobs (CRITICAL for ChatGPT Actions):\n"
-            "  Boniforce reports take 30-120s. Each tool call long-polls up to 40s server-side\n"
-            "  (the upper bound for ChatGPT's per-call HTTP timeout). A 120s report therefore\n"
-            "  needs UP TO 3 sequential tool calls within the SAME user turn:\n"
-            "    call 1 = create_report(..., wait_seconds=40)         (~0-40s elapsed)\n"
-            "    call 2 = get_job_status(job_id, wait_seconds=40)     (~40-80s elapsed)\n"
-            "    call 3 = get_job_status(job_id, wait_seconds=40)     (~80-120s elapsed)\n"
+            "  Boniforce reports take 30-120s. create_report returns immediately so its live\n"
+            "  progress card can render. Then each status call long-polls up to 40s server-side.\n"
+            "  A 120s report therefore needs one start call plus UP TO 3 status calls:\n"
+            "    start  = create_report(..., wait_seconds=0)          (job + live card)\n"
+            "    poll 1 = get_job_status(job_id, wait_seconds=40)     (~0-40s elapsed)\n"
+            "    poll 2 = get_job_status(job_id, wait_seconds=40)     (~40-80s elapsed)\n"
+            "    poll 3 = get_job_status(job_id, wait_seconds=40)     (~80-120s elapsed)\n"
             "  After EACH call, inspect `done` in the response:\n"
             "    - done=true  -> read the report (or call get_report) and reply to user.\n"
             "    - done=false -> call get_job_status again immediately. DO NOT stop, DO NOT\n"
@@ -270,6 +272,21 @@ def _make_mcp() -> FastMCP:
         ),
         auth=_build_verifier(),
     )
+
+    @mcp.resource(
+        BONISCORE_PROGRESS_UI_URI,
+        mime_type="text/html;profile=mcp-app",
+        meta={
+            "ui": {"prefersBorder": True},
+            "openai/widgetDescription": (
+                "Live-Status und Ergebnis einer laufenden Boniscore-Prüfung."
+            ),
+            "openai/widgetPrefersBorder": True,
+        },
+    )
+    def boniscore_progress_ui() -> str:
+        """Render the live Boniscore progress card for MCP Apps clients."""
+        return BONISCORE_PROGRESS_HTML
 
     async def _user_only() -> str:
         """Validate the JWT and return the user_id. No Boniforce key required.
@@ -398,6 +415,12 @@ def _make_mcp() -> FastMCP:
             "openWorldHint": True,
         },
         meta={
+            "ui": {
+                "resourceUri": BONISCORE_PROGRESS_UI_URI,
+                "visibility": ["model", "app"],
+            },
+            "openai/outputTemplate": BONISCORE_PROGRESS_UI_URI,
+            "openai/widgetAccessible": True,
             "openai/toolInvocation/invoking": "Boniscore-Bericht wird erstellt …",
             "openai/toolInvocation/invoked": "Boniscore-Anfrage abgeschlossen",
         },
@@ -410,10 +433,10 @@ def _make_mcp() -> FastMCP:
         register_court: str | None = None,
         search_result_id: str | None = None,
         session_id: str | None = None,
-        wait_seconds: int = 40,
+        wait_seconds: int = 0,
     ) -> Any:
-        """Step 2 of Boniscore workflow: kick off report generation AND wait
-        server-side for it to finish (default 40s, max 40s).
+        """Step 2 of Boniscore workflow: start report generation and return
+        immediately by default so compatible clients can show a live card.
 
         ⚠️ PRECONDITION: call list_reports FIRST. Only call create_report
         if no completed report for this company exists with created_at
@@ -425,13 +448,13 @@ def _make_mcp() -> FastMCP:
         provide register_type, register_number, and register_court. Company
         name is optional when search_result_id is supplied.
 
-        With the default wait_seconds=40, the response inlines `final_status`
-        and (if completed) the full `report`. Reports take 30-120s, so the
-        response also includes a `done` boolean: if `done` is False,
+        With the default wait_seconds=0, the response contains the job ID and
+        opens a live progress card in compatible MCP Apps clients. Reports take
+        30-120s. If `done` is False,
         immediately call get_job_status(job_id, wait_seconds=40) and repeat
-        until done=True (typically ≤3 calls total). Never tell the user the
-        job is "still processing" before you have called get_job_status at
-        least 2 more times after this one."""
+        until done=True (up to 3 status calls). Clients without MCP Apps still
+        receive the normal tool data and final assistant response. An explicit
+        wait_seconds up to 40 retains the legacy server-side long-poll."""
         _validate_company_identifier(
             search_result_id, register_type, register_number, register_court
         )
@@ -463,7 +486,7 @@ def _make_mcp() -> FastMCP:
         except BoniforceError as e:
             raise _wrap(e)
         ws = max(0, min(40, wait_seconds))
-        status_value: str | None = None
+        status_value: str | None = data.get("status")
         if ws and data.get("job_id"):
             await report_progress("Die Boniscore-Berechnung wurde gestartet …")
             try:
@@ -492,7 +515,11 @@ def _make_mcp() -> FastMCP:
             "destructiveHint": False,
             "idempotentHint": True,
             "openWorldHint": False,
-        }
+        },
+        meta={
+            "ui": {"visibility": ["model", "app"]},
+            "openai/widgetAccessible": True,
+        },
     )
     async def get_report(report_id: str) -> Any:
         """Step 4 of Boniscore workflow: fetch a finished report. Returns the
@@ -515,6 +542,8 @@ def _make_mcp() -> FastMCP:
             "openWorldHint": False,
         },
         meta={
+            "ui": {"visibility": ["model", "app"]},
+            "openai/widgetAccessible": True,
             "openai/toolInvocation/invoking": "Boniscore-Berechnung läuft …",
             "openai/toolInvocation/invoked": "Boniscore-Status aktualisiert",
         },

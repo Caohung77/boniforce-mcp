@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Add a standards-based MCP App for `create_report` that renders a live
+  Boniscore progress card in ChatGPT, polls the existing status tool, and
+  displays the score, assessment, and credit limit when the report completes.
+- Make `create_report` return immediately by default so the progress card can
+  appear before the 30-120 second report generation finishes. Non-UI clients
+  keep the same model-driven polling and final response workflow.
 - Send German MCP progress notifications with elapsed time while Boniscore
   reports are being generated or polled. Clients without progress support
   continue to use the existing responses unchanged.

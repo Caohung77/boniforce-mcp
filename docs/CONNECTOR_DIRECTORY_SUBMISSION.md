@@ -143,8 +143,9 @@ tool. Verify with MCP Inspector.
 - `favicon.ico` (multi-size 16/32/48) + `favicon-192.png`
 - Optional `logo-light.svg`, `logo-dark.svg` for theme variants
 
-**Skip:** screenshots — Boniforce-MCP is a tool surface, not an MCP App
-that renders UI in Claude.
+**Screenshots:** include the inline Boniscore progress card for MCP Apps
+compatible hosts. Claude clients that do not render MCP App resources continue
+to receive the complete plain tool result.
 
 **Hosting:** static directory served by existing boniforce.de site.
 Verify: `curl -I https://boniforce.de/static/connector/logo.svg` →
@@ -235,7 +236,7 @@ submission date.
 | Privacy policy URL | from B4 |
 | Logo | URL from B3 |
 | Favicon | URL from B3 |
-| Screenshots | none — not an MCP App |
+| Screenshots | inline Boniscore progress/result card |
 | Allowed link URIs | `https://boniforce.de`, `https://api.boniforce.de`, `https://sectorbench.theaiwhisperer.cloud` |
 
 ## Phase 3 — Pre-submit verification
@@ -299,8 +300,9 @@ Total dev time: ~6h code + ~1d copy. Long pole: legal review on B4.
 
 ## Open decisions
 
-1. **MCP App?** No interactive UI rendered in Claude → submit as plain
-   connector, skip screenshots.
+1. **MCP App?** Yes — `create_report` links to a standards-based inline
+   progress/result card. Confirm the current Claude directory's screenshot and
+   rendering support at submission time; plain-tool fallback remains complete.
 2. **Allowed link URIs** — include Sectorbench? Yes if users may be
    redirected to source; otherwise skip to keep approval scope small.
 3. **Category** — confirm against Anthropic's current category list at

@@ -123,6 +123,11 @@ You need to enable it once:
    - **Authentifizierung**: **OAuth** *(leave Erweiterte OAuth-Einstellungen closed — auto-discovery handles it)*
 5. Save → a browser window opens → paste your **Boniforce API key**. Done.
 
+When ChatGPT creates a new report, Boniforce now shows an inline live card
+immediately. It follows the calculation through queued/running/completed and
+shows the Boniscore result when ready; ChatGPT still provides its normal text
+assessment underneath.
+
 > Custom connectors are currently **web-only** in ChatGPT and not yet exposed
 > on the free tier.
 
