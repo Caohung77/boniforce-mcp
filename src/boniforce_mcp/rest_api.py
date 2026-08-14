@@ -206,21 +206,64 @@ def annotate_job_outcome(
 
     The model (ChatGPT Action / Claude tool call) only sees one HTTP response
     per call. ChatGPT's per-call timeout is ~45s and our long-poll caps at 40s,
-    so reports >40s need 2-3 sequential calls. ``next_action`` makes that
-    explicit instead of relying on instruction-following alone.
+    so reports >40s need 2-3 sequential calls. ``next_action`` makes both the
+    polling loop and the final score-reading step explicit.
     """
     if not isinstance(payload, dict):
         return payload
     status_str = (status_value or "").lower().strip()
     done = status_str in TERMINAL_JOB_STATUSES
     payload["done"] = done
-    if not done:
-        jid = job_id or payload.get("job_id") or "<job_id>"
+    jid = job_id or payload.get("job_id") or "<job_id>"
+    if status_str in ("completed", "finished"):
+        report_id = payload.get("report_id")
+        if isinstance(payload.get("report"), dict):
+            payload["next_action"] = (
+                "Report completed. Read report.score for the Boniscore, then "
+                "report.credit_limit and report.credit_assessment_result."
+            )
+        elif report_id:
+            payload["next_action"] = (
+                f"Report completed. Call getReport with report_id={report_id} "
+                "now to fetch the Boniscore; the job status itself is not the "
+                "credit report."
+            )
+        else:
+            payload["next_action"] = (
+                "Report completed. Call getReport now with the report_id returned "
+                "by createReport to fetch the Boniscore."
+            )
+    elif not done:
         payload["next_action"] = (
             f"Job not finished yet (status={status_str or 'unknown'}). "
             f"Call get_job_status again with job_id={jid} and wait_seconds=40. "
             "Keep calling until done=true (typically 1-3 calls, max ~120s total)."
         )
+    return payload
+
+
+async def _attach_completed_report(
+    client: Any,
+    token: str,
+    payload: Any,
+    status_value: str | None,
+) -> Any:
+    """Inline the finished report so action clients receive the Boniscore."""
+    if not isinstance(payload, dict):
+        return payload
+    status_str = (status_value or "").lower().strip()
+    report_id = payload.get("report_id")
+    if (
+        status_str in ("completed", "finished")
+        and report_id
+        and not isinstance(payload.get("report"), dict)
+    ):
+        try:
+            payload["report"] = await client.get_report(token, report_id)
+        except Exception:
+            # Keep the completed status usable. next_action will tell the model
+            # to call getReport explicitly if the convenience fetch failed.
+            pass
     return payload
 
 
@@ -308,11 +351,7 @@ async def create_report(request: Request) -> Response:
             status = await client.wait_for_job(token, data["job_id"], max_wait_s=wait_s)
             data["final_status"] = status
             status_value = (status or {}).get("status")
-            if (status_value or "").lower() in ("completed", "finished") and data.get("report_id"):
-                try:
-                    data["report"] = await client.get_report(token, data["report_id"])
-                except Exception:
-                    pass
+            await _attach_completed_report(client, token, data, status_value)
     annotate_job_outcome(data, data.get("job_id"), status_value)
     return JSONResponse(data)
 
@@ -345,6 +384,10 @@ async def get_job_status(request: Request) -> Response:
             data = await _client_holder().get_job_status(token, job_id)
     except Exception as exc:
         return _err(502, f"Boniforce upstream: {exc}")
+    if isinstance(data, dict):
+        await _attach_completed_report(
+            _client_holder(), token, data, data.get("status")
+        )
     annotate_job_outcome(data, job_id, (data or {}).get("status") if isinstance(data, dict) else None)
     return JSONResponse(data)
 
@@ -619,7 +662,7 @@ def _openapi_spec() -> dict[str, Any]:
         "openapi": "3.1.0",
         "info": {
             "title": "Boniforce REST API (for ChatGPT Custom GPTs)",
-            "version": "1.0.0",
+            "version": "1.0.1",
             "description": (
                 "Per-user proxy for the Boniforce credit-data API. Authenticate "
                 "via OAuth 2.1 with the Boniforce MCP authorization server "
@@ -634,7 +677,10 @@ def _openapi_spec() -> dict[str, Any]:
                 "a 30-120s computation that returns the same data.\n"
                 "1. Only if no fresh report exists: GET /api/v1/search (then "
                 "/search/advanced only if needed) → POST /api/v1/reports using "
-                "search_result_id → poll GET /api/v1/jobs/{id}/status?wait=40.\n"
+                "search_result_id → poll GET /api/v1/jobs/{id}/status?wait=40. "
+                "When done=true, read the Boniscore from report.score. If report "
+                "is absent, immediately call GET /api/v1/reports/{report_id}; a "
+                "completed job status alone is not the credit report.\n"
                 "Follow-up questions about a company you already have a report_id "
                 "for: ALWAYS reuse that report_id, never POST /reports again."
             ),
@@ -734,10 +780,21 @@ def _openapi_spec() -> dict[str, Any]:
                         "next_action": {
                             "type": "string",
                             "description": (
-                                "Present only when done=false. Plain-English "
-                                "instruction for the model: keep polling until "
-                                "done=true (typically 1-3 calls total, max ~120s)."
+                                "Required follow-up for the model: keep polling "
+                                "when done=false; when completed, read report.score "
+                                "or call getReport if report is absent."
                             ),
+                        },
+                        "report": {
+                            "description": (
+                                "Finished credit report, included when status is "
+                                "completed and the convenience fetch succeeds. Read "
+                                "report.score for the Boniscore."
+                            ),
+                            "oneOf": [
+                                {"$ref": "#/components/schemas/Report"},
+                                {"type": "null"},
+                            ],
                         },
                         "error_message": {"type": "string", "nullable": True},
                     },
@@ -1303,8 +1360,9 @@ def _openapi_spec() -> dict[str, Any]:
                         "all register fields. With ?wait=40 the server long-polls up "
                         "to 40s and inlines the finished report. Reports take 30-120s — if "
                         "done=false, immediately call getJobStatus with ?wait=40 and repeat "
-                        "(max 3 calls) until done=true. Never reply 'still processing' before "
-                        "3 calls."
+                        "(max 3 calls) until done=true. When done=true, read report.score. "
+                        "If report is absent, call getReport with report_id before answering. "
+                        "Never reply 'still processing' before 3 calls."
                     ),
                     "parameters": [
                         {
@@ -1335,7 +1393,22 @@ def _openapi_spec() -> dict[str, Any]:
                             }
                         },
                     },
-                    "responses": {"200": {"description": "Job accepted (and possibly inlined report when wait used)."}},
+                    "responses": {
+                        "200": {
+                            "description": (
+                                "Job accepted. With wait, a completed response includes "
+                                "the finished credit report at report and its Boniscore "
+                                "at report.score."
+                            ),
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/JobStatus"
+                                    }
+                                }
+                            },
+                        }
+                    },
                 },
             },
             "/api/v1/financial_data": {
@@ -1414,8 +1487,10 @@ def _openapi_spec() -> dict[str, Any]:
                         "Returns latest job status (queued -> running -> completed/failed). "
                         "With ?wait=40 the server long-polls up to 40s. Response has done=true "
                         "(terminal) or done=false + next_action (still running — call again "
-                        "with ?wait=40). Loop until done=true; max 3 calls before treating "
-                        "the job as stuck."
+                        "with ?wait=40). On successful completion, the response includes the "
+                        "credit report and Boniscore at report.score. If report is absent, "
+                        "call getReport with report_id before answering. Loop until done=true; "
+                        "max 3 calls before treating the job as stuck."
                     ),
                     "parameters": [
                         {
@@ -1432,7 +1507,21 @@ def _openapi_spec() -> dict[str, Any]:
                             "description": "Seconds to wait server-side for status change (0-40).",
                         },
                     ],
-                    "responses": {"200": {"description": "OK"}},
+                    "responses": {
+                        "200": {
+                            "description": (
+                                "Current job status; completed responses normally include "
+                                "the finished report and report.score."
+                            ),
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/JobStatus"
+                                    }
+                                }
+                            },
+                        }
+                    },
                 }
             },
             "/api/v1/reports/{report_id}/financial_data": {

@@ -83,6 +83,7 @@ def test_openapi_spec_served(app):
     assert r.status_code == 200
     spec = r.json()
     assert spec["openapi"].startswith("3.1")
+    assert spec["info"]["version"] == "1.0.1"
     op_ids = {
         spec["paths"][p][m]["operationId"]
         for p in spec["paths"]
@@ -113,6 +114,18 @@ def test_openapi_spec_served(app):
     ]["application/json"]["schema"]
     assert "search_result_id" in create_schema["properties"]
     assert "required" not in create_schema
+    job_schema = spec["components"]["schemas"]["JobStatus"]
+    assert job_schema["properties"]["report"]["oneOf"][0] == {
+        "$ref": "#/components/schemas/Report"
+    }
+    for path, method in (
+        ("/api/v1/reports", "post"),
+        ("/api/v1/jobs/{job_id}/status", "get"),
+    ):
+        response_schema = spec["paths"][path][method]["responses"]["200"][
+            "content"
+        ]["application/json"]["schema"]
+        assert response_schema == {"$ref": "#/components/schemas/JobStatus"}
 
 
 def test_rest_unauthenticated_rejected(app):
@@ -157,6 +170,44 @@ async def test_rest_create_report_accepts_search_result_id(app):
             )
     assert r.status_code == 200, r.text
     assert route.calls.last.request.content == b'{"search_result_id":"search-1"}'
+
+
+@pytest.mark.asyncio
+async def test_completed_job_status_includes_report_score(app):
+    _, token = await _seed_user()
+    with respx.mock(assert_all_called=True) as rx:
+        rx.get("https://api.boniforce.de/v1/jobs/j1/status").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "job_id": "j1",
+                    "report_id": "r1",
+                    "status": "completed",
+                },
+            )
+        )
+        rx.get("https://api.boniforce.de/v1/reports/r1").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "report_id": "r1",
+                    "score": 84,
+                    "credit_limit": 25000,
+                    "credit_assessment_result": "APPROVE",
+                },
+            )
+        )
+        with TestClient(app) as c:
+            response = c.get(
+                "/api/v1/jobs/j1/status",
+                headers={"authorization": f"Bearer {token}"},
+            )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["done"] is True
+    assert payload["report"]["score"] == 84
+    assert "Read report.score" in payload["next_action"]
 
 
 @pytest.mark.asyncio
