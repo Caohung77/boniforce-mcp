@@ -83,7 +83,7 @@ def test_openapi_spec_served(app):
     assert r.status_code == 200
     spec = r.json()
     assert spec["openapi"].startswith("3.1")
-    assert spec["info"]["version"] == "1.0.2"
+    assert spec["info"]["version"] == "1.0.3"
     op_ids = {
         spec["paths"][p][m]["operationId"]
         for p in spec["paths"]
@@ -112,6 +112,10 @@ def test_openapi_spec_served(app):
     create_schema = spec["paths"]["/api/v1/reports"]["post"]["requestBody"][
         "content"
     ]["application/json"]["schema"]
+    assert (
+        spec["paths"]["/api/v1/reports"]["post"]["x-openai-isConsequential"]
+        is False
+    )
     assert "search_result_id" in create_schema["properties"]
     assert "required" not in create_schema
     operation_descriptions = {

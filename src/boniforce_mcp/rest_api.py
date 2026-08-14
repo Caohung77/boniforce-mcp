@@ -662,7 +662,7 @@ def _openapi_spec() -> dict[str, Any]:
         "openapi": "3.1.0",
         "info": {
             "title": "Boniforce REST API (for ChatGPT Custom GPTs)",
-            "version": "1.0.2",
+            "version": "1.0.3",
             "description": (
                 "Per-user proxy for the Boniforce credit-data API. Authenticate "
                 "via OAuth 2.1 with the Boniforce MCP authorization server "
@@ -1354,6 +1354,7 @@ def _openapi_spec() -> dict[str, Any]:
                 },
                 "post": {
                     "operationId": "createReport",
+                    "x-openai-isConsequential": False,
                     "summary": "Start Boniscore report. Pass ?wait=40 to long-poll up to 40s.",
                     "description": (
                         "Costs 75 credits. Use search_result_id or all register fields. "
